@@ -183,10 +183,25 @@ input[type=range]{accent-color:var(--gold)}
         <label id="ducatOptWrap" title="Ducat's on-gain Copper trash">Ducat:
           <select id="custDucat"><option value="on">trash a Copper on gain</option><option value="off">keep the Copper</option></select>
         </label>
+        <label id="gearOptWrap" title="What Gear banks for the next hand">Gear:
+          <select id="custGear"><option value="auto">auto (pretest 10k each)</option><option value="coins">bank treasure</option><option value="action">bank the action</option></select>
+        </label>
+        <label id="wwOptWrap" title="What Wishing Well names">Wishing Well:
+          <select id="custWW"><option value="auto">auto (pretest 10k each)</option><option value="copper">name Copper</option><option value="best">name the best card</option></select>
+        </label>
+        <label id="envoyOptWrap" title="Which of our cards the Envoy opponent denies">Envoy:
+          <select id="custEnvoy"><option value="auto">auto (pretest, opponent minimizes)</option><option value="card">opponent denies the action</option><option value="treasure">opponent denies treasure</option></select>
+        </label>
+        <label id="baubleOptWrap" title="Bauble's topdeck option on a missed turn">Bauble:
+          <select id="custBauble"><option value="silver">buy + topdeck a Silver on a miss</option><option value="off">never buy the Silver</option></select>
+        </label>
+        <label id="salvOptWrap" title="May Salvager trash the other gained card when that reaches the target?">Salvager:
+          <select id="custSalvager"><option value="off">only trashes Estates</option><option value="on">may trash the gained card to hit</option></select>
+        </label>
         <label id="cruOptWrap" title="May Crucible trash the other gained card when that reaches the target?">Crucible:
           <select id="custCrucible">
-            <option value="on">may trash the gained card to hit</option>
             <option value="off">only trashes Estates</option>
+            <option value="on">may trash the gained card to hit</option>
           </select>
         </label>
         <label id="starOptWrap" title="Which card Star Chart puts on top after each shuffle">Star Chart:
@@ -216,6 +231,9 @@ input[type=range]{accent-color:var(--gold)}
         </select>
       </label>
       <label title="Fisherman costs $2 on turn 1 (empty discard), which plays out completely differently on 3/4 vs 4/3 - so it only appears when a single split is selected."><input type="checkbox" id="gFishAlways"> always show Fisherman</label>
+      <label>Card order:
+        <select id="gSort"><option value="cost">by cost</option><option value="alpha">alphabetical</option></select>
+      </label>
       <button id="runSelfPairs" class="ghost" title="Run every double opening (Silver+Silver, Haven+Haven, ...); skips rows already in the table">Run all self pairs</button>
       <button id="runMatrix" class="ghost" title="With custom cards A and B: run A+A, A+B and B+B">Run custom matrix</button>
       <label title="Silos, Storeroom and Cellar normally hold back rather than draw the deck below 5 cards, since triggering an early shuffle is usually bad play."><input type="checkbox" id="gEarlyShuffle"> allow early shuffles</label>
@@ -265,9 +283,14 @@ input[type=range]{accent-color:var(--gold)}
       <label for="wspeed">Speed</label>
       <input type="range" id="wspeed" min="0" max="100" value="55">
       <label><input type="checkbox" id="wauto" checked> auto-start next game</label>
+      <label title="Arrange the exact order of the turn-3 shuffle by dragging cards. Left = top of the deck."><input type="checkbox" id="wstack"> stack the T3 deck</label>
       <label><input type="checkbox" id="wskip"> skip to turn 3</label>
     </div>
     <div class="statusline" id="wstatus">Pick an opening and press Play or Step. Uses the target $ and board/events settings above.</div>
+    <div class="zone" id="stackBox" style="display:none;margin-bottom:12px">
+      <h3>Turn-3 deck order (left = top of deck; drag to rearrange) <button id="stackRnd" class="ghost" style="padding:2px 8px;font-size:12px">randomize</button></h3>
+      <div class="cards" id="zStack"></div>
+    </div>
     <div class="board">
       <div class="zones">
         <div class="zone"><h3>Deck <span class="count" id="cDeck">0</span></h3><div class="cards" id="zDeck"></div></div>
@@ -344,13 +367,19 @@ const CARDS = {
   EN:{name:"Envoy",         cost:4, coin:0, cls:"A", action:true, plusA:0},
   CE:{name:"Cellar",        cost:2, coin:0, cls:"A", action:true, plusA:1},
   WW:{name:"Wishing Well",  cost:3, coin:0, cls:"A", action:true, plusA:1},
+  BA:{name:"Bauble",        cost:2, coin:0, cls:"H", treasure:true},
+  CO:{name:"Courier",       cost:4, coin:0, cls:"A", action:true, plusA:0},
+  DG:{name:"Dungeon",       cost:3, coin:0, cls:"D", action:true, plusA:1, duration:true},
+  SV:{name:"Salvager",      cost:4, coin:0, cls:"A", action:true, plusA:0},
+  WE:{name:"Wedding",       cost:4, coin:0, cls:"PR", event:true},
+  AS:{name:"Asceticism",    cost:3, coin:0, cls:"PR", event:true},
   PG:{name:"Pageant",       cost:3, coin:0, cls:"PR", project:true},
   ST:{name:"Star Chart",    cost:3, coin:0, cls:"PR", project:true},
   SL:{name:"Silos",         cost:4, coin:0, cls:"PR", project:true},
   SN:{name:"Sinister Plot", cost:4, coin:0, cls:"PR", project:true},
 };
 const BAD_CARDS=["C","E","X"];
-const OPEN_CARDS = ["V","R","T","D","MO","SU","FI","FG","DU","CD","CE","H","L","W","G","K","Z","CH","SK","CM","CS","BL","SR","GE","EX","WW","PG","ST","B","M","P","A","I","Y","N","O","U","J","AD","IM","MG","PT","BH","CR","GO","PC","AL","KS","EN","SL","SN","F","FM"];
+const OPEN_CARDS = ["V","R","T","D","MO","SU","FI","FG","DU","CD","CE","BA","H","L","W","G","K","Z","CH","SK","CM","CS","BL","SR","GE","EX","WW","DG","AS","PG","ST","B","M","P","A","I","Y","N","O","U","J","AD","IM","MG","PT","BH","CR","GO","PC","AL","KS","EN","CO","SV","SL","SN","F","FM","WE"];
 const PICKABLE   = ["S"].concat(OPEN_CARDS);
 
 /* ================= engine =================
@@ -362,6 +391,7 @@ function newGame(){
           exile:[], suns:0, debt:0, gainedTarget:false, cargoAvail:0,
           gearMode:"coins", cellarMode:"safe", wwMode:"copper", envoyMode:"treasure",
           cargoMode:"silver", blockadeMode:"silver", ducatTrash:true, allowEarly:false,
+          baubleMode:"silver", salvagerMode:"off", baubleAvail:false, nextDungeon:0, stackT3:null, stackUsed:false,
           nextCoins:0, nextDraws:0, nextDiscard:0, nextChurchTrash:0,
           havenMode:"coins", starMode:"best", advisorMode:"treasure", needPotion:false};
 }
@@ -369,6 +399,13 @@ function shuffleInto(g, emit){
   const a=g.discard;
   for(let i=a.length-1;i>0;i--){const j=(Math.random()*(i+1))|0;const t=a[i];a[i]=a[j];a[j]=t;}
   g.deck=a; g.discard=[];
+  if(g.stackT3 && !g.stackUsed && g.turn>=3){
+    g.stackUsed=true;
+    const rest=g.deck.slice(); const ordered=[];
+    for(const k of g.stackT3){ const i=rest.indexOf(k); if(i>=0){ ordered.push(k); rest.splice(i,1); } }
+    g.deck = rest.concat(ordered.reverse()); // stack[0] = top of deck; unmatched cards sink to the bottom
+    if(emit) emit("deck stacked by hand (watch mode) — Shadow/Star Chart rules still apply");
+  }
   // Shadow cards always go to the bottom of the shuffled deck
   for(let i=g.deck.length-1;i>=0;i--){
     if(CARDS[g.deck[i]].shadow){ const c=g.deck.splice(i,1)[0]; g.deck.unshift(c); }
@@ -477,7 +514,7 @@ function discardWorstN(g,n,who,emit){
 function playActions(g, target, emit){
   let actions=1;
   const lastTurn = g.turn>=4;
-  for(const k of ["W","U","HO","EX","AL","T","V","D","Z","AD","IM","MG","PT","PC","FM","WW","CD","CE","A","G","O","F","L","R","P","K","CH","H","BH","N","M","B","EN","Y","GE","J","MO","SR","CS","BL","FI","KS","CM"]){
+  for(const k of ["W","U","HO","EX","DG","AL","T","V","D","Z","AD","IM","MG","PT","PC","FM","WW","CD","CE","A","G","O","F","L","R","P","K","CH","H","BH","N","M","B","EN","Y","GE","SV","CO","J","MO","SR","CS","BL","FI","KS","CM"]){
     while(g.hand.includes(k) || (CARDS[k].shadow && g.deck.includes(k))){
       const fromDeck = CARDS[k].shadow && !g.hand.includes(k);
       if(actions<=0){
@@ -517,6 +554,13 @@ function playActions(g, target, emit){
         removeOne(g.hand,"EX");
         if(emit) emit("play Experiment (+2 cards, +1 action) — it returns to its pile");
         draw(g,2,emit);
+      }
+
+      if(k==="DG"){ // Dungeon (Duration): +1 Action; now and next turn: +2 cards, discard 2
+        removeOne(g.hand,"DG"); g.duration.push("DG"); g.nextDungeon++;
+        if(emit) emit("play Dungeon (+1 action; +2 cards then discard 2, now and next turn)");
+        draw(g,2,emit);
+        discardWorstN(g,Math.min(2,g.hand.length),"Dungeon",emit);
       }
 
       if(k==="AL"){ // Alley (Shadow): +1 Card +1 Action, discard a card
@@ -709,7 +753,7 @@ function playActions(g, target, emit){
         if(emit) emit("play Cellar (+1 action)");
         let junk=g.hand.filter(x=>x==="E"||x==="X");
         if(g.hand.includes("B")&&!spareEstate(g)) junk=junk.filter((x,i)=>!(x==="E"&&i===junk.indexOf("E"))); // keep Baron's Estate
-        const cap = (g.cellarMode==="dig"||g.allowEarly) ? junk.length : Math.max(0, g.deck.length-(lastTurn?0:5));
+        const cap = g.allowEarly ? junk.length : (lastTurn ? g.deck.length : Math.max(0, g.deck.length-5));
         const n=Math.min(junk.length, cap);
         if(n>0){
           for(let d=0;d<n;d++){ const x=junk[d]; removeOne(g.hand,x); g.discard.push(x); }
@@ -1019,6 +1063,44 @@ function playActions(g, target, emit){
         }
       }
 
+      if(k==="SV"){ // Salvager (terminal): +1 Buy; trash a card for +$cost
+        const c0=turnCoins(g)+pendingBaron(g);
+        let pick=null;
+        if(spareEstate(g)) pick="E";
+        if(!pick && g.salvagerMode==="on" && c0<target){
+          for(const k2 of [...new Set(g.hand)]){
+            if(["C","Q","E","X","SV","SK","PO","GD"].includes(k2)) continue;
+            if(!CARDS[k2].action && !CARDS[k2].treasure && k2!=="I") continue;
+            const d=costNow(g,k2)-CARDS[k2].coin;
+            if(d>0 && c0+d>=target){ pick=k2; break; }
+          }
+        }
+        if(!pick){ if(emit) emit("Salvager stays in hand (nothing worth trashing)"); break; }
+        removeOne(g.hand,"SV"); g.inPlay.push("SV");
+        removeOne(g.hand,pick); g.trash.push(pick);
+        const pv=costNow(g,pick);
+        g.bonus+=pv;
+        if(emit) emit("play Salvager (+1 buy): trash "+CARDS[pick].name+" ($"+pv+") -> +$"+pv);
+      }
+
+      if(k==="CO"){ // Courier (terminal): +$1; discard top; play a plain treasure from the discard
+        removeOne(g.hand,"CO"); g.inPlay.push("CO"); g.bonus+=1;
+        if(emit) emit("play Courier (+$1)");
+        if(g.deck.length===0 && g.discard.length>0){ if(emit) emit("shuffle discard into deck (to discard the top)"); shuffleInto(g, emit); }
+        if(g.deck.length>0){
+          const top=g.deck.pop(); g.discard.push(top);
+          if(emit) emit("Courier: discard the top card ("+CARDS[top].name+")");
+        }
+        let played=null;
+        for(const w of ["GD","S","FG","C","Q"]) if(g.discard.includes(w)){ played=w; break; }
+        if(played){
+          removeOne(g.discard,played); g.inPlay.push(played);
+          const v = played==="FG" ? 1 : CARDS[played].coin;
+          g.bonus+=v;
+          if(emit) emit("Courier: play "+CARDS[played].name+" from the discard pile -> +$"+v);
+        } else if(emit) emit("Courier: no plain treasure in the discard to play");
+      }
+
       if(k==="J"){ // Silk Merchant (terminal): +2 Cards, +1 Buy
         removeOne(g.hand,"J"); g.inPlay.push("J");
         if(emit) emit("play Silk Merchant (+2 cards, +1 buy)");
@@ -1035,7 +1117,7 @@ function playActions(g, target, emit){
         removeOne(g.hand,"SR"); g.inPlay.push("SR");
         if(emit) emit("play Storeroom (+1 buy)");
         let junk=()=>g.hand.filter(x=>(x==="E"&&spareEstate(g))||x==="X");
-        const cap = g.allowEarly ? 99 : Math.max(0, g.deck.length-(lastTurn?0:5));
+        const cap = g.allowEarly ? 99 : (lastTurn ? g.deck.length : Math.max(0, g.deck.length-5));
         const n=Math.min(junk().length, cap, g.deck.length);
         if(n>0){
           for(let d=0;d<n;d++){ const x=junk()[0]; removeOne(g.hand,x); g.discard.push(x); }
@@ -1126,22 +1208,24 @@ function dedupeGains(gains){
 }
 function planBuys(m1, m2, gains, flags, startCoffers){
   flags=flags||{}; startCoffers=startCoffers||0;
-  const optionsFor=(rem,money,coffers,turnIdx)=>{
+  const optionsFor=(rem,money,coffers,turnIdx,noAlms)=>{
     const o=[{pick:null,spend:0}];
     rem.forEach((c,i)=>{
       const cost = c==="FM" ? (turnIdx===0?2:5) : CARDS[c].cost; // Fisherman: discard pile is empty on T1
       if(cost<=money) o.push({pick:{i,how:"cash",card:c},spend:0});
       else if(cost<=money+coffers) o.push({pick:{i,how:"cash",card:c},spend:cost-money});
-      if(flags.alms && cost<=4 && !CARDS[c].project) o.push({pick:{i,how:"alms",card:c},spend:0});
+      if(flags.alms && !noAlms && cost<=4 && !CARDS[c].project && !CARDS[c].event) o.push({pick:{i,how:"alms",card:c},spend:0});
       if(flags.amass && CARDS[c].action && cost<=5 && money>=2) o.push({pick:{i,how:"amass",card:c},spend:0});
     });
     return o;
   };
   let best=null;
-  for(const a of optionsFor(gains,m1,startCoffers,0)){
+  for(const a of optionsFor(gains,m1,startCoffers,0,false)){
     const cof1 = startCoffers - a.spend + (a.pick&&a.pick.card==="J"?1:0);
+    const debt1 = (a.pick&&a.pick.card==="WE") ? 3 : 0; // Wedding: 3 Debt eats into turn 2 (and blocks Alms there)
+    const m2eff = Math.max(0, m2-debt1);
     const rem2 = gains.filter((_,i)=>!(a.pick&&a.pick.i===i));
-    for(const b of optionsFor(rem2,m2,cof1,1)){
+    for(const b of optionsFor(rem2,m2eff,cof1,1,debt1>0)){
       const n=(a.pick?1:0)+(b.pick?1:0);
       const cost=(a.pick?CARDS[a.pick.card].cost:0)+(b.pick?CARDS[b.pick.card].cost:0);
       const spend=a.spend+b.spend;
@@ -1175,6 +1259,20 @@ function execBuy(g, entry, hadGains, emit, tfair){
   if(entry.spend>0){
     g.coffers-=entry.spend;
     if(emit) emit("spend "+entry.spend+" Coffers for +$"+entry.spend+" ("+g.coffers+" left)");
+  }
+  if(CARDS[pick.card].event){
+    spentMoney=CARDS[pick.card].cost-entry.spend;
+    if(pick.card==="WE"){
+      g.debt+=3;
+      if(emit) emit("buy Wedding ($4 + 3 Debt, +1 VP): gain a Gold");
+      if(tfair && (handCoins(g)-spentMoney)>=2){ g.deck.push("GD"); spentMoney+=2; if(emit) emit("Travelling Fair: the Gold goes onto the deck"); }
+      else g.discard.push("GD");
+    }
+    if(pick.card==="AS"){
+      if(removeOne(g.hand,"E")){ g.trash.push("E"); if(emit) emit("buy Asceticism ($2 + pay $1): trash an Estate from hand"); }
+      else if(emit) emit("buy Asceticism: no Estate in hand to trash");
+    }
+    return spentMoney;
   }
   if(CARDS[pick.card].project){
     g.projects.push(pick.card);
@@ -1270,6 +1368,11 @@ function playTreasurePhase(g, target, scen, lastTurn, emit){
     g.deck.push("HO");
     if(emit) emit("play Supplies (+$1): gain a Horse onto the deck (drawn next turn)");
   }
+  // Bauble: choose +$1 and the topdeck option
+  for(let i=countOf(g.hand,"BA"); i>0; i--){
+    g.bonus+=1; g.baubleAvail=true;
+    if(emit) emit("play Bauble (+$1; gains this turn may be topdecked)");
+  }
   // Ducat: +1 Coffers whenever played at buy time
   for(let i=countOf(g.hand,"DU"); i>0; i--){
     g.coffers++;
@@ -1277,7 +1380,7 @@ function playTreasurePhase(g, target, scen, lastTurn, emit){
   }
   const potionOk = !scen.targetPotion || g.hand.includes("PO");
   // Crucible: trash an Estate for +$2, or (mode on) the other gained card if that converts a miss into a hit
-  const crMode = scen.crucibleMode==="off" ? "off" : "on";
+  const crMode = scen.crucibleMode==="on" ? "on" : "off"; // per spec: only a manual override allows trashing the gained card
   while(g.hand.includes("CR")){
     const c0=turnCoins(g);
     let pick=null, delta=0;
@@ -1341,6 +1444,9 @@ function playGame(scen, target, rec){
   g.allowEarly = !!scen.allowEarlyShuffle;
   g.gainsRef = scen.gains;
   g.ducatTrashFlag = scen.ducatTrash!=="off";
+  g.baubleMode = scen.baubleMode==="off" ? "off" : "silver";
+  g.salvagerMode = scen.salvagerMode==="on" ? "on" : "off";
+  g.stackT3 = scen.stackT3||null;
   // scen.crucibleMode is read directly in playTreasurePhase
   g.needPotion = !!scen.targetPotion;
   g.coffers = (scen.gains.includes("F")||scen.bakerBoard) ? 1 : 0; // Baker setup: never stacks above 1
@@ -1379,7 +1485,15 @@ function playGame(scen, target, rec){
       if(emit) emit("Tide Pools: discard "+g.nextDiscard+" at start of turn");
       discardWorstN(g,g.nextDiscard,"Tide Pools",emit);
     }
-    g.nextDraws=0; g.nextCoins=0; g.nextDiscard=0;
+    if(g.nextDungeon>0){
+      for(let dg=0; dg<g.nextDungeon; dg++){
+        if(emit) emit("Dungeon: +2 cards then discard 2 (start of turn)");
+        draw(g,2,emit);
+        discardWorstN(g,Math.min(2,g.hand.length),"Dungeon",emit);
+      }
+      g.nextDungeon=0;
+    }
+    g.nextDraws=0; g.nextCoins=0; g.nextDiscard=0; g.baubleAvail=false;
     g.inPlay.push(...g.duration); g.duration=[];
     if(g.projects.includes("SN") && turn>=2){
       if(turn>=4 && g.plotTokens>0){
@@ -1402,6 +1516,11 @@ function playGame(scen, target, rec){
     if(emit) emit("— Turn "+turn+": hand "+g.hand.map(x=>CARDS[x].name).join(", ")+" ($"+turnCoins(g)+(g.coffers?", "+g.coffers+" Coffers":"")+(g.villagers?", "+g.villagers+" Villagers":"")+") —");
 
     if(turn<=2){
+      if(g.debt>0){
+        const pay=Math.min(handCoins(g), g.debt);
+        g.debt-=pay;
+        if(emit) emit("pay $"+pay+" toward Debt ("+g.debt+" remaining) — $"+(handCoins(g)-pay)+" left to buy with");
+      }
       if(turn===1) plan=planBuys(handCoins(g), 7-handCoins(g), gains, scen, g.coffers);
       const spent=execBuy(g, plan[turn-1], gains.length>0, emit, scen.tfair && turn===2);
       if(g.projects.includes("PG") && handCoins(g)-spent>=1){
@@ -1445,9 +1564,13 @@ function playGame(scen, target, rec){
         }
         if(turn===3) tiaraBuy(g, emit);
       }
-      // Cargo Ship: on a miss, buy a card and ship it into next turn's hand
+      // Cargo Ship / Bauble: on a miss, buy a Silver for next turn (one extra buy total)
       let cargoSpent=0;
-      if(g.cargoAvail>0 && turn<4 && !hit && !g.gainedTarget && g.debt===0){
+      if(g.baubleAvail && g.baubleMode!=="off" && g.cargoAvail===0 && turn<4 && !hit && !g.gainedTarget && g.debt===0 && c>=3){
+        g.deck.push("S"); cargoSpent=3;
+        if(emit) emit("Bauble: buy a Silver ($3) and put it onto the deck (drawn next turn)");
+      }
+      if(cargoSpent===0 && g.cargoAvail>0 && turn<4 && !hit && !g.gainedTarget && g.debt===0){
         let buyC=null;
         if(g.cargoMode==="best"){
           const cands=["GD"].concat(g.gainsRef.filter(k2=>CARDS[k2]&&!CARDS[k2].project&&CARDS[k2].cost>=4)).concat(["S","C"]);
@@ -1501,10 +1624,6 @@ function pretestDims(scen){
   if(scen.gains.includes("GE") && scen.gains.some(k=>k!=="GE"&&CARDS[k]&&CARDS[k].action)){
     dims.push({key:"gearMode", auto:(scen.gearMode||"auto")==="auto", val:scen.gearMode,
       vals:["coins","action"], name:{coins:"gear: bank treasure",action:"gear: bank the action"}});
-  }
-  if(scen.gains.includes("CE")){
-    dims.push({key:"cellarMode", auto:(scen.cellarMode||"auto")==="auto", val:scen.cellarMode,
-      vals:["safe","dig"], name:{safe:"cellar: no early shuffle",dig:"cellar: dig freely"}});
   }
   if(scen.gains.includes("WW")){
     dims.push({key:"wwMode", auto:(scen.wwMode||"auto")==="auto", val:scen.wwMode,
@@ -1631,6 +1750,7 @@ function flagSuffix(f){
   if(f.targetType!=="action")t.push("target: "+f.targetType);
   if(f.split==="34")t.push("3/4 only");
   if(f.split==="43")t.push("4/3 only");
+  if(f.allowEarlyShuffle)t.push("early shuffles ok");
   return t.length? " ["+t.join(", ")+"]" : "";
 }
 function mkScen(id,label,gains,extra){
@@ -1638,16 +1758,20 @@ function mkScen(id,label,gains,extra){
   return Object.assign({id,label:label+flagSuffix(f),gains,
     alms:f.alms, amass:f.amass, bakerBoard:f.bakerBoard, tfair:f.tfair, targetType:f.targetType, split:f.split,
     allowEarlyShuffle:f.allowEarlyShuffle,
-    cargoMode:"silver", blockadeMode:"silver", ducatTrash:"on",
+    cargoMode:"silver", blockadeMode:"silver", ducatTrash:"on", baubleMode:"silver", salvagerMode:"off",
     gearMode:"auto", cellarMode:"auto", wwMode:"auto", envoyMode:"auto",
     targetPotion:currentTarget().potion,
     havenMode:"auto", starMode:"auto", advisorMode:"auto"}, extra||{});
 }
 function openCardsNow(){
   let list=OPEN_CARDS.slice();
+  if(document.getElementById("gSort").value==="alpha")
+    list.sort((a,b)=>CARDS[a].name.localeCompare(CARDS[b].name));
   const split=document.getElementById("gSplit").value;
-  if(split==="both" && !document.getElementById("gFishAlways").checked)
-    list=list.filter(k=>k!=="FM");
+  if(split==="both"){
+    if(!document.getElementById("gFishAlways").checked) list=list.filter(k=>k!=="FM");
+    list=list.filter(k=>k!=="WE"); // Wedding: single-split only, no override
+  }
   return document.getElementById("gBad").checked ? list.concat(BAD_CARDS) : list;
 }
 function pickableNow(){
@@ -1660,7 +1784,7 @@ function buildScenarios(){
     const b=document.getElementById("cust2").value;
     const gains=[]; if(a!=="-")gains.push(a); if(b!=="-")gains.push(b);
     const nm=gains.length? gains.map(k=>CARDS[k].name).join(" + ") : "Nothing";
-    return [mkScen("custom","Custom: "+nm,gains,{havenMode:document.getElementById("custHaven").value, starMode:document.getElementById("custStar").value, advisorMode:document.getElementById("custAdvisor").value, crucibleMode:document.getElementById("custCrucible").value, cargoMode:document.getElementById("custCargo").value, blockadeMode:document.getElementById("custBlockade").value, ducatTrash:document.getElementById("custDucat").value})];
+    return [mkScen("custom","Custom: "+nm,gains,{havenMode:document.getElementById("custHaven").value, starMode:document.getElementById("custStar").value, advisorMode:document.getElementById("custAdvisor").value, crucibleMode:document.getElementById("custCrucible").value, cargoMode:document.getElementById("custCargo").value, blockadeMode:document.getElementById("custBlockade").value, ducatTrash:document.getElementById("custDucat").value, gearMode:document.getElementById("custGear").value, wwMode:document.getElementById("custWW").value, envoyMode:document.getElementById("custEnvoy").value, baubleMode:document.getElementById("custBauble").value, salvagerMode:document.getElementById("custSalvager").value})];
   }
   if(document.getElementById("gPair").checked){
     const c=document.getElementById("pairCard").value;
@@ -1827,6 +1951,12 @@ function updateRulesNote(t){
     "Cellar: discards Estates/Curses to redraw; 'no early shuffle' vs 'dig freely' is A/B pretested. Wishing Well: naming Copper vs the best remaining card is A/B pretested. "+
     "Silos, Storeroom and Cellar never draw the deck below 5 cards before turn 4 unless 'allow early shuffles' is on. "+
     "Sim cache: finished non-exact runs are stored locally; repeat runs are reused and larger runs only simulate the difference. "+
+    "Bauble: +$1 and the topdeck option; on a missed turn with $3+ it buys a Silver onto the deck (Cargo Ship and Bauble share the single extra buy; option to disable in custom). "+
+    "Courier: +$1, discards the top card, then plays the best plain treasure from the discard pile (actions from the discard are not replayed in this sim). "+
+    "Dungeon: sifts +2/-2 on both turns. Salvager: trashes a spare Estate for +$2; only the manual override lets it trash the other gained card, and Crucible now follows the same default. "+
+    "Wedding ($4 + 3 Debt, single-split modes only): gains a Gold; the Debt is paid from the next turn's coins before anything can be bought, and blocks Alms that turn. "+
+    "Asceticism: treated as a $3 opening buy that trashes an Estate from hand. "+
+    "The turn-3 deck can be stacked by hand in the watch section for debugging. "+
     "An Estate that a Baron in hand needs is never trashed, buried, set aside, or discarded.";
 }
 updateRulesNote(5);
@@ -1848,10 +1978,16 @@ function getPool(){
     return pool;
   }catch(err){ pool=null; return null; }
 }
+let renderPending=false;
+function scheduleRender(){
+  if(renderPending) return;
+  renderPending=true;
+  setTimeout(()=>{ renderPending=false; renderRows(); }, 80);
+}
 function upsertRow(row){
   const i=lastRows.findIndex(r=>r.key===row.key);
   if(i>=0) lastRows[i]=row; else lastRows.push(row);
-  renderRows();
+  scheduleRender(); // coalesced: hundreds of cache hits render once, not once each
 }
 
 function runScenarios(scens, forceAppend){
@@ -1888,7 +2024,7 @@ function runScenarios(scens, forceAppend){
   const cacheKey=(scen)=>{
     const o={g:scen.gains.slice().sort(), t:ct.label,
       f:[!!scen.alms,!!scen.amass,!!scen.bakerBoard,!!scen.tfair,scen.targetType,scen.split,!!scen.targetPotion,!!scen.allowEarlyShuffle],
-      m:[scen.havenMode,scen.starMode,scen.advisorMode,scen.crucibleMode,scen.cargoMode,scen.blockadeMode,scen.ducatTrash,scen.gearMode,scen.cellarMode,scen.wwMode,scen.envoyMode]};
+      m:[scen.havenMode,scen.starMode,scen.advisorMode,scen.crucibleMode,scen.cargoMode,scen.blockadeMode,scen.ducatTrash,scen.gearMode,scen.wwMode,scen.envoyMode,scen.baubleMode,scen.salvagerMode]};
     return "domsim1:"+JSON.stringify(o);
   };
   const loadCache=(k)=>{ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(e){ return null; } };
@@ -2030,6 +2166,11 @@ function updateHavenVis(){
   document.getElementById("cargoOptWrap").style.display = (v1==="CS"||v2==="CS") ? "" : "none";
   document.getElementById("blockOptWrap").style.display = (v1==="BL"||v2==="BL") ? "" : "none";
   document.getElementById("ducatOptWrap").style.display = (v1==="DU"||v2==="DU") ? "" : "none";
+  document.getElementById("gearOptWrap").style.display = (v1==="GE"||v2==="GE") ? "" : "none";
+  document.getElementById("wwOptWrap").style.display = (v1==="WW"||v2==="WW") ? "" : "none";
+  document.getElementById("envoyOptWrap").style.display = (v1==="EN"||v2==="EN") ? "" : "none";
+  document.getElementById("baubleOptWrap").style.display = (v1==="BA"||v2==="BA") ? "" : "none";
+  document.getElementById("salvOptWrap").style.display = (v1==="SV"||v2==="SV") ? "" : "none";
 }
 document.getElementById("cust1").value="S";
 document.getElementById("cust2").value="S";
@@ -2066,10 +2207,10 @@ document.getElementById("gPair").addEventListener("change",e=>{
   if(e.target.checked){ document.getElementById("gCustom").checked=false; document.getElementById("customBox").classList.remove("on"); document.getElementById("customnote").style.display="none"; }
   refreshWatchScenarios();
 });
-for(const id of ["gSilver","gSolo","cust1","cust2","custHaven","custStar","custAdvisor","custCrucible","custCargo","custBlockade","custDucat","pairCard","gPairLegal","gAlms","gAmass","gBaker","gTFair","gTargetType","gEarlyShuffle"]){
+for(const id of ["gSilver","gSolo","cust1","cust2","custHaven","custStar","custAdvisor","custCrucible","custCargo","custBlockade","custDucat","custGear","custWW","custEnvoy","custBauble","custSalvager","pairCard","gPairLegal","gAlms","gAmass","gBaker","gTFair","gTargetType","gEarlyShuffle"]){
   document.getElementById(id).addEventListener("change",refreshWatchScenarios);
 }
-for(const id of ["gSplit","gFishAlways"]){
+for(const id of ["gSplit","gFishAlways","gSort"]){
   document.getElementById(id).addEventListener("change",()=>{ refillAllSelects(); updateHavenVis(); refreshWatchScenarios(); });
 }
 
@@ -2102,10 +2243,76 @@ function snapshot(g,msg,hi){
     coins:turnCoins(g),
   };
 }
+/* ---- deck stacking (watch mode) ---- */
+let stackArr=[];
+function currentWatchScen(){
+  if(watchScenOverride) return watchScenOverride;
+  const all=buildScenarios();
+  return all.find(x=>x.id===wscen.value)||all[0];
+}
+function rebuildStack(){
+  const scen=currentWatchScen();
+  let list=startingCards(scen).slice();
+  for(const k of scen.gains){
+    if(!CARDS[k]||CARDS[k].project) continue;
+    if(CARDS[k].event){ if(k==="WE") list.push("GD"); continue; } // Wedding adds its Gold; Asceticism adds nothing
+    list.push(k);
+    if(k==="KS") list.push("GD");
+    if(k==="EX") list.push("EX");
+    if(k==="DU" && (scen.ducatTrash!=="off")){ const i=list.indexOf("C"); if(i>=0) list.splice(i,1); }
+  }
+  if(scen.gains.includes("AS")){ const i=list.indexOf("E"); if(i>=0) list.splice(i,1); }
+  stackArr=list;
+  renderStack();
+}
+function renderStack(){
+  const z=document.getElementById("zStack"); z.innerHTML="";
+  stackArr.forEach((k,i)=>{
+    const d=cardEl(k);
+    d.draggable=true; d.dataset.idx=i; d.style.cursor="grab";
+    d.addEventListener("dragstart",e=>{ e.dataTransfer.setData("text/plain",String(i)); });
+    d.addEventListener("dragover",e=>e.preventDefault());
+    d.addEventListener("drop",e=>{
+      e.preventDefault();
+      const from=+e.dataTransfer.getData("text/plain"), to=+d.dataset.idx;
+      if(isNaN(from)||from===to) return;
+      const [m]=stackArr.splice(from,1);
+      stackArr.splice(to,0,m);
+      renderStack();
+    });
+    z.appendChild(d);
+  });
+}
+document.getElementById("wstack").addEventListener("change",e=>{
+  document.getElementById("stackBox").style.display = e.target.checked ? "" : "none";
+  if(e.target.checked) rebuildStack();
+});
+document.getElementById("stackRnd").addEventListener("click",()=>{
+  for(let i=stackArr.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const t=stackArr[i];stackArr[i]=stackArr[j];stackArr[j]=t; }
+  renderStack();
+});
+
+/* ---- type-ahead search on the card dropdowns ---- */
+function attachTypeahead(sel){
+  let buf="", timer=null;
+  sel.addEventListener("keydown",e=>{
+    if(e.key.length===1 && /[a-z0-9 ']/i.test(e.key) && !e.ctrlKey && !e.altKey && !e.metaKey){
+      buf+=e.key.toLowerCase();
+      clearTimeout(timer); timer=setTimeout(()=>{buf="";},800);
+      const opt=[...sel.options].find(o=>o.textContent.toLowerCase().startsWith(buf));
+      if(opt && sel.value!==opt.value){ sel.value=opt.value; sel.dispatchEvent(new Event("change")); }
+      e.preventDefault();
+    }
+  });
+}
+for(const id of ["cust1","cust2","pairCard","wscen"]) attachTypeahead(document.getElementById(id));
+
 function recordGame(scenId){
   let scen;
   if(watchScenOverride){ scen=watchScenOverride; }
   else { const all=buildScenarios(); scen=all.find(s=>s.id===scenId)||all[0]; }
+  if(document.getElementById("wstack").checked && stackArr.length>0)
+    scen=Object.assign({}, scen, {stackT3: stackArr.slice()});
   const ct=currentTarget(); const t=ct.t;
   scen=resolveScenario(scen, t, 4000).scen; // resolve auto strategy modes so the watch matches the sim
   frames=[]; fi=0;
@@ -2188,7 +2395,7 @@ document.getElementById("wstep").addEventListener("click",()=>{
   if(fi<frames.length) stepFrame();
 });
 document.getElementById("wnew").addEventListener("click",()=>{ stopPlay(); newWatchGame(); document.getElementById("wstatus").textContent="New game ready \u2014 press Play or Step."; });
-wscen.addEventListener("change",()=>{ watchScenOverride=null; stopPlay(); frames=[]; fi=0; wlog.innerHTML=""; });
+wscen.addEventListener("change",()=>{ watchScenOverride=null; stopPlay(); frames=[]; fi=0; wlog.innerHTML=""; if(document.getElementById("wstack").checked) rebuildStack(); });
 function updatePotionUI(){
   const tp=currentTarget().potion;
   const solo=document.getElementById("gSolo");
