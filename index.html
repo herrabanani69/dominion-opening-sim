@@ -174,6 +174,15 @@ input[type=range]{accent-color:var(--gold)}
             <option value="treasure">opponent denies treasure</option>
           </select>
         </label>
+        <label id="cargoOptWrap" title="What Cargo Ship buys and ships to the next hand on a missed turn">Cargo Ship:
+          <select id="custCargo"><option value="silver">ship a bought Silver</option><option value="best">ship the best affordable card</option></select>
+        </label>
+        <label id="blockOptWrap" title="What Blockade gains set-aside for the next hand">Blockade:
+          <select id="custBlockade"><option value="silver">gain a Silver</option><option value="best">gain the opening's card if possible</option></select>
+        </label>
+        <label id="ducatOptWrap" title="Ducat's on-gain Copper trash">Ducat:
+          <select id="custDucat"><option value="on">trash a Copper on gain</option><option value="off">keep the Copper</option></select>
+        </label>
         <label id="cruOptWrap" title="May Crucible trash the other gained card when that reaches the target?">Crucible:
           <select id="custCrucible">
             <option value="on">may trash the gained card to hit</option>
@@ -208,6 +217,13 @@ input[type=range]{accent-color:var(--gold)}
       </label>
       <label title="Fisherman costs $2 on turn 1 (empty discard), which plays out completely differently on 3/4 vs 4/3 - so it only appears when a single split is selected."><input type="checkbox" id="gFishAlways"> always show Fisherman</label>
       <button id="runSelfPairs" class="ghost" title="Run every double opening (Silver+Silver, Haven+Haven, ...); skips rows already in the table">Run all self pairs</button>
+      <button id="runMatrix" class="ghost" title="With custom cards A and B: run A+A, A+B and B+B">Run custom matrix</button>
+      <label title="Silos, Storeroom and Cellar normally hold back rather than draw the deck below 5 cards, since triggering an early shuffle is usually bad play."><input type="checkbox" id="gEarlyShuffle"> allow early shuffles</label>
+      <label title="Finished runs are saved locally; re-running the same opening reuses them, and asking for more games only simulates the difference."><input type="checkbox" id="gCache" checked> use sim cache</label>
+      <button id="clearCache" class="ghost" title="Delete all locally cached simulation results">clear cache</button>
+      <label>CPU <span title="Caps how many worker threads the simulation uses, as a share of your CPU cores. Lower = slower runs but a responsive machine. Applies from the next run." style="cursor:help;border-bottom:1px dotted var(--gold)">&#9432;</span>
+        <input type="range" id="gCpu" min="10" max="100" value="60" style="width:90px;vertical-align:middle"> <span id="gCpuVal" class="progress">60%</span>
+      </label>
       <label title="The type of the card you are trying to gain on turns 3/4. Amass can only gain the target when it is an Action.">Target card type:
         <select id="gTargetType">
           <option value="action">Action</option>
@@ -315,13 +331,26 @@ const CARDS = {
   FI:{name:"Fishmonger",    cost:2, coin:0, cls:"A", action:true, plusA:0, shadow:true},
   AL:{name:"Alley",         cost:4, coin:0, cls:"A", action:true, plusA:1, shadow:true},
   CM:{name:"Craftsman",     cost:3, coin:0, cls:"A", action:true, plusA:0},
+  CS:{name:"Cargo Ship",    cost:3, coin:0, cls:"D", action:true, plusA:0, duration:true},
+  BL:{name:"Blockade",      cost:3, coin:0, cls:"D", action:true, plusA:0, duration:true},
+  FG:{name:"Fool's Gold",   cost:2, coin:0, cls:"H", treasure:true},
+  SR:{name:"Storeroom",     cost:3, coin:0, cls:"A", action:true, plusA:0},
+  KS:{name:"Skulk",         cost:4, coin:0, cls:"A", action:true, plusA:0},
+  GD:{name:"Gold",          cost:6, coin:3, cls:"H", treasure:true},
+  GE:{name:"Gear",          cost:3, coin:0, cls:"D", action:true, plusA:0, duration:true},
+  DU:{name:"Ducat",         cost:2, coin:0, cls:"H", treasure:true},
+  CD:{name:"Candlestick Maker", cost:2, coin:0, cls:"A", action:true, plusA:1},
+  EX:{name:"Experiment",    cost:3, coin:0, cls:"A", action:true, plusA:1},
+  EN:{name:"Envoy",         cost:4, coin:0, cls:"A", action:true, plusA:0},
+  CE:{name:"Cellar",        cost:2, coin:0, cls:"A", action:true, plusA:1},
+  WW:{name:"Wishing Well",  cost:3, coin:0, cls:"A", action:true, plusA:1},
   PG:{name:"Pageant",       cost:3, coin:0, cls:"PR", project:true},
   ST:{name:"Star Chart",    cost:3, coin:0, cls:"PR", project:true},
   SL:{name:"Silos",         cost:4, coin:0, cls:"PR", project:true},
   SN:{name:"Sinister Plot", cost:4, coin:0, cls:"PR", project:true},
 };
 const BAD_CARDS=["C","E","X"];
-const OPEN_CARDS = ["V","R","T","D","MO","SU","FI","H","L","W","G","K","Z","CH","SK","CM","PG","ST","B","M","P","A","I","Y","N","O","U","J","AD","IM","MG","PT","BH","CR","GO","PC","AL","SL","SN","F","FM"];
+const OPEN_CARDS = ["V","R","T","D","MO","SU","FI","FG","DU","CD","CE","H","L","W","G","K","Z","CH","SK","CM","CS","BL","SR","GE","EX","WW","PG","ST","B","M","P","A","I","Y","N","O","U","J","AD","IM","MG","PT","BH","CR","GO","PC","AL","KS","EN","SL","SN","F","FM"];
 const PICKABLE   = ["S"].concat(OPEN_CARDS);
 
 /* ================= engine =================
@@ -330,7 +359,9 @@ function newGame(){
   return {deck:[], hand:[], discard:[], inPlay:[], duration:[], setAside:[],
           trash:[], revealed:[], turn:0, bonus:0, coffers:0, villagers:0,
           plotTokens:0, projects:[],
-          exile:[], suns:0, debt:0, gainedTarget:false,
+          exile:[], suns:0, debt:0, gainedTarget:false, cargoAvail:0,
+          gearMode:"coins", cellarMode:"safe", wwMode:"copper", envoyMode:"treasure",
+          cargoMode:"silver", blockadeMode:"silver", ducatTrash:true, allowEarly:false,
           nextCoins:0, nextDraws:0, nextDiscard:0, nextChurchTrash:0,
           havenMode:"coins", starMode:"best", advisorMode:"treasure", needPotion:false};
 }
@@ -373,12 +404,15 @@ function draw(g,n,emit){
   }
 }
 function handCoins(g){
-  let c=0, best=0;
+  let c=0, best=0, fg=0, hasI=false;
   for(const k of g.hand){
+    if(k==="FG"){ fg++; continue; }
+    if(k==="I"){ hasI=true; continue; }
     const v=CARDS[k].coin; c+=v;
-    if(v>best && k!=="I") best=v;
+    if(v>best) best=v;
   }
-  if(g.hand.includes("I")) c+=best; // Tiara plays the best other treasure twice
+  if(fg>0){ c += 1+4*(fg-1); if(best<4) best=4; } // 1st Fool's Gold $1, later ones $4; Tiara replay counts as a later play
+  if(hasI) c+=best; // Tiara plays the best other treasure twice
   return c;
 }
 function turnCoins(g){ return handCoins(g)+g.bonus; }
@@ -418,6 +452,9 @@ function keepValues(g){
     if(k==="GO") return 1.9;
     if(k==="CR") return 1.4;
     if(k==="SU") return 1.0;
+    if(k==="FG") return 1.7;
+    if(k==="DU") return 1.1;
+    if(k==="GD") return 3;
     if(k==="X") return -0.5;
     if(k==="E"){ if(hasB && !boosted){boosted=true; return 3.9;} return 0; }
     if(k==="S") return 2;
@@ -440,7 +477,7 @@ function discardWorstN(g,n,who,emit){
 function playActions(g, target, emit){
   let actions=1;
   const lastTurn = g.turn>=4;
-  for(const k of ["W","U","HO","AL","T","V","D","Z","AD","IM","MG","PT","PC","FM","A","G","O","F","L","R","P","K","CH","H","BH","N","M","B","Y","J","MO","FI","CM"]){
+  for(const k of ["W","U","HO","EX","AL","T","V","D","Z","AD","IM","MG","PT","PC","FM","WW","CD","CE","A","G","O","F","L","R","P","K","CH","H","BH","N","M","B","EN","Y","GE","J","MO","SR","CS","BL","FI","KS","CM"]){
     while(g.hand.includes(k) || (CARDS[k].shadow && g.deck.includes(k))){
       const fromDeck = CARDS[k].shadow && !g.hand.includes(k);
       if(actions<=0){
@@ -473,6 +510,12 @@ function playActions(g, target, emit){
       if(k==="HO"){ // Horse: +2 Cards +1 Action, returns to its pile
         removeOne(g.hand,"HO");
         if(emit) emit("play Horse (+2 cards, +1 action) — it returns to its pile");
+        draw(g,2,emit);
+      }
+
+      if(k==="EX"){ // Experiment: +2 Cards +1 Action, returns to its pile
+        removeOne(g.hand,"EX");
+        if(emit) emit("play Experiment (+2 cards, +1 action) — it returns to its pile");
         draw(g,2,emit);
       }
 
@@ -637,6 +680,42 @@ function playActions(g, target, emit){
         removeOne(g.hand,"FM"); g.inPlay.push("FM"); g.bonus+=1;
         if(emit) emit("play Fisherman (+1 card, +1 action, +$1)");
         draw(g,1,emit);
+      }
+
+      if(k==="WW"){ // Wishing Well: +1 Card +1 Action; name a card, reveal top
+        removeOne(g.hand,"WW"); g.inPlay.push("WW");
+        if(emit) emit("play Wishing Well (+1 card, +1 action)");
+        draw(g,1,emit);
+        if(g.deck.length===0 && g.discard.length>0){ if(emit) emit("shuffle discard into deck (to reveal)"); shuffleInto(g, emit); }
+        if(g.deck.length>0){
+          let named="C";
+          if(g.wwMode==="best"){
+            named = g.deck.includes("S") ? "S" : (g.deck.find(x=>CARDS[x].action&&!CARDS[x].shadow) || "C");
+          }
+          const top=g.deck[g.deck.length-1];
+          if(emit){ g.revealed.push(top); emit("name "+CARDS[named].name+"; reveal "+CARDS[top].name); g.revealed.length=0; }
+          if(top===named){ g.deck.pop(); g.hand.push(top); if(emit) emit("named it! "+CARDS[top].name+" goes to hand"); }
+          else if(emit) emit("wrong guess, it stays on top");
+        } else if(emit) emit("Wishing Well: nothing to reveal");
+      }
+
+      if(k==="CD"){ // Candlestick Maker: +1 Action +1 Buy +1 Coffers
+        removeOne(g.hand,"CD"); g.inPlay.push("CD"); g.coffers++;
+        if(emit) emit("play Candlestick Maker (+1 action, +1 buy, +1 Coffers — now "+g.coffers+")");
+      }
+
+      if(k==="CE"){ // Cellar: +1 Action; discard any number, draw that many
+        removeOne(g.hand,"CE"); g.inPlay.push("CE");
+        if(emit) emit("play Cellar (+1 action)");
+        let junk=g.hand.filter(x=>x==="E"||x==="X");
+        if(g.hand.includes("B")&&!spareEstate(g)) junk=junk.filter((x,i)=>!(x==="E"&&i===junk.indexOf("E"))); // keep Baron's Estate
+        const cap = (g.cellarMode==="dig"||g.allowEarly) ? junk.length : Math.max(0, g.deck.length-(lastTurn?0:5));
+        const n=Math.min(junk.length, cap);
+        if(n>0){
+          for(let d=0;d<n;d++){ const x=junk[d]; removeOne(g.hand,x); g.discard.push(x); }
+          if(emit) emit("Cellar: discard "+n+" junk card"+(n>1?"s":"")+", draw "+n);
+          draw(g,n,emit);
+        } else if(emit) emit("Cellar: nothing worth discarding"+(junk.length>0?" without forcing an early shuffle":""));
       }
 
       if(k==="A"){
@@ -886,10 +965,58 @@ function playActions(g, target, emit){
         if(emit) emit("play Baron: discard an Estate for +$4 (+1 buy)");
       }
 
+      if(k==="EN"){ // Envoy (terminal): reveal 5, opponent denies one, rest to hand
+        removeOne(g.hand,"EN"); g.inPlay.push("EN");
+        if(emit) emit("play Envoy (reveal top 5)");
+        const looked=[];
+        for(let i=0;i<5;i++){
+          if(g.deck.length===0){
+            if(g.discard.length===0) break;
+            if(emit) emit("shuffle discard into deck (to reveal)"); shuffleInto(g, emit);
+          }
+          looked.push(g.deck.pop());
+        }
+        if(looked.length>0){
+          if(emit){ g.revealed.push(...looked); emit("Envoy reveals: "+looked.map(x=>CARDS[x].name).join(", ")); g.revealed.length=0; }
+          let deny=null;
+          if(g.needPotion && looked.includes("PO")) deny="PO";
+          if(!deny && g.envoyMode==="card" && (actions>0||g.villagers>0)){
+            deny=looked.find(x=>CARDS[x].action); // only worth denying if we could still play it
+          }
+          if(!deny){ for(const w of ["S","FG","C","Q"]) if(looked.includes(w)){ deny=w; break; } }
+          if(!deny) deny=looked[0];
+          removeOne(looked,deny); g.discard.push(deny);
+          g.hand.push(...looked);
+          if(emit) emit("opponent discards our "+CARDS[deny].name+"; the other "+looked.length+" go to hand");
+        } else if(emit) emit("Envoy: nothing to reveal");
+      }
+
       if(k==="Y"){
         removeOne(g.hand,"Y"); g.inPlay.push("Y");
         if(emit) emit("play Smithy (+3 cards)");
         draw(g,3,emit);
+      }
+
+      if(k==="GE"){ // Gear (Duration, terminal): +2 Cards; set aside up to 2 for next turn
+        removeOne(g.hand,"GE"); g.duration.push("GE");
+        if(emit) emit("play Gear (+2 cards)");
+        draw(g,2,emit);
+        if(!lastTurn && g.hand.length>0){
+          const banked=[];
+          if(g.gearMode==="action"){
+            const a=g.hand.find(x=>CARDS[x].action);
+            if(a){ removeOne(g.hand,a); g.setAside.push(a); banked.push(a); }
+          }
+          let eff=turnCoins(g)+pendingBaron(g);
+          while(banked.length<2){
+            let t=null;
+            if(eff>target) t=largestTreasureKeeping(g,target,eff);
+            else if(eff<target) t=treasureIn(g,TREAS_DESC);
+            if(!t) break;
+            removeOne(g.hand,t); g.setAside.push(t); banked.push(t); eff-=CARDS[t].coin;
+          }
+          if(emit) emit(banked.length? "Gear: set aside "+banked.map(x=>CARDS[x].name).join(", ")+" (returns next turn)":"Gear: set aside nothing");
+        }
       }
 
       if(k==="J"){ // Silk Merchant (terminal): +2 Cards, +1 Buy
@@ -902,6 +1029,48 @@ function playActions(g, target, emit){
         removeOne(g.hand,"MO"); g.inPlay.push("MO");
         if(emit) emit("play Moat (+2 cards)");
         draw(g,2,emit);
+      }
+
+      if(k==="SR"){ // Storeroom (terminal): +1 Buy; sift junk, then cash junk for +$1 each
+        removeOne(g.hand,"SR"); g.inPlay.push("SR");
+        if(emit) emit("play Storeroom (+1 buy)");
+        let junk=()=>g.hand.filter(x=>(x==="E"&&spareEstate(g))||x==="X");
+        const cap = g.allowEarly ? 99 : Math.max(0, g.deck.length-(lastTurn?0:5));
+        const n=Math.min(junk().length, cap, g.deck.length);
+        if(n>0){
+          for(let d=0;d<n;d++){ const x=junk()[0]; removeOne(g.hand,x); g.discard.push(x); }
+          if(emit) emit("Storeroom: discard "+n+" junk, draw "+n);
+          draw(g,n,emit);
+        }
+        // second phase: discard remaining junk for +$1 each
+        let cash=0;
+        while(junk().length>0){ const x=junk()[0]; removeOne(g.hand,x); g.discard.push(x); cash++; }
+        if(cash>0){ g.bonus+=cash; if(emit) emit("Storeroom: discard "+cash+" more junk for +$"+cash); }
+        else if(n===0 && emit) emit("Storeroom: nothing worth discarding");
+      }
+
+      if(k==="CS"){ // Cargo Ship (Duration, terminal): +$2; may set aside a gained card for next turn
+        removeOne(g.hand,"CS"); g.duration.push("CS");
+        g.bonus+=2; g.cargoAvail++;
+        if(emit) emit("play Cargo Ship (+$2; can ship one card gained this turn to next hand)");
+      }
+
+      if(k==="BL"){ // Blockade (Duration, terminal): gain a card <= $4 set aside for next turn
+        if(lastTurn){ if(emit) emit("Blockade stays in hand (last simulated turn, its gain would arrive too late)"); break; }
+        removeOne(g.hand,"BL"); g.duration.push("BL");
+        let gainC="S";
+        if(g.blockadeMode==="best" && g.gainsRef){
+          for(const k2 of g.gainsRef){ // the opening's own card, if it is a gainable <= $4 non-project
+            if(CARDS[k2] && !CARDS[k2].project && CARDS[k2].cost<=4 && CARDS[k2].cost>=3 && (CARDS[k2].action||CARDS[k2].treasure) && k2!=="BL"){ gainC=k2; break; }
+          }
+        }
+        g.setAside.push(gainC);
+        if(emit) emit("play Blockade: gain "+CARDS[gainC].name+" set aside (to hand next turn)");
+      }
+
+      if(k==="KS"){ // Skulk: never worth an action in the opening (its Gold came on gain)
+        if(emit) emit("Skulk stays in hand (playing it does nothing useful solo)");
+        break;
       }
 
       if(k==="FI"){ // Fishmonger (Shadow, terminal): +1 Buy, +$1
@@ -995,7 +1164,8 @@ function planBuys(m1, m2, gains, flags, startCoffers){
 }
 function acquiredCount(gains,flags,startCoffers){
   gains=dedupeGains(gains);
-  const picks=planBuys(4,3,gains,flags,startCoffers||0);
+  const ms = (flags&&flags.split==="34") ? [3,4] : [4,3];
+  const picks=planBuys(ms[0],ms[1],gains,flags,startCoffers||0);
   return (picks[0].pick?1:0)+(picks[1].pick?1:0);
 }
 function execBuy(g, entry, hadGains, emit, tfair){
@@ -1034,6 +1204,24 @@ function execBuy(g, entry, hadGains, emit, tfair){
       g.coffers++; g.villagers++;
       if(emit) emit("Silk Merchant on-gain: +1 Coffers, +1 Villager (now "+g.coffers+" / "+g.villagers+")");
     }
+    if(pick.card==="KS"){
+      if(useTF){ // Travelling Fair: topdeck the Gold instead of the Skulk
+        const i=g.deck.lastIndexOf("KS");
+        if(i>=0){ g.deck.splice(i,1); g.discard.push("KS"); }
+        g.deck.push("GD");
+        if(emit) emit("Skulk on-gain: gain a Gold — Travelling Fair puts the Gold on top instead");
+      } else {
+        g.discard.push("GD");
+        if(emit) emit("Skulk on-gain: gain a Gold to the discard pile");
+      }
+    }
+    if(pick.card==="EX"){
+      g.discard.push("EX");
+      if(emit) emit("Experiment on-gain: gain a second Experiment (that one comes alone)");
+    }
+    if(pick.card==="DU" && g.ducatTrashFlag!==false){
+      if(removeOne(g.hand,"C")){ g.trash.push("C"); if(emit) emit("Ducat on-gain: trash a Copper from hand"); }
+    }
   }
   return spentMoney;
 }
@@ -1046,13 +1234,15 @@ function startingCards(scen){
 
 /* Silos: exact enumeration over the known deck multiset — for each possible
    number of Coppers discarded, compute the true hit probability, pick the best. */
-function silosDecide(g,target){
+function silosDecide(g,target,lastTurn){
   const nC=countOf(g.hand,"C");
   if(nC===0) return 0;
   const cur=turnCoins(g);
   const deckCoins=g.deck.map(k=>CARDS[k].coin);
   let bestK=0, bestP=(cur>=target)?1:0, bestE=cur;
-  const maxK=Math.min(nC, deckCoins.length, 5);
+  // never draw the deck below 5 (that would force an early shuffle next turn) unless allowed
+  const shuffleCap = g.allowEarly ? deckCoins.length : Math.max(0, deckCoins.length-(lastTurn?0:5));
+  const maxK=Math.min(nC, shuffleCap, 5);
   for(let k=1;k<=maxK;k++){
     const n=deckCoins.length;
     const idx=[...Array(k).keys()];
@@ -1079,6 +1269,11 @@ function playTreasurePhase(g, target, scen, lastTurn, emit){
   for(let i=countOf(g.hand,"SU"); i>0; i--){
     g.deck.push("HO");
     if(emit) emit("play Supplies (+$1): gain a Horse onto the deck (drawn next turn)");
+  }
+  // Ducat: +1 Coffers whenever played at buy time
+  for(let i=countOf(g.hand,"DU"); i>0; i--){
+    g.coffers++;
+    if(emit) emit("play Ducat (+1 buy, +1 Coffers — now "+g.coffers+")");
   }
   const potionOk = !scen.targetPotion || g.hand.includes("PO");
   // Crucible: trash an Estate for +$2, or (mode on) the other gained card if that converts a miss into a hit
@@ -1137,6 +1332,15 @@ function playGame(scen, target, rec){
   g.havenMode = scen.havenMode==="action" ? "action" : "coins";
   g.starMode = scen.starMode==="copper" ? "copper" : "best";
   g.advisorMode = scen.advisorMode==="card" ? "card" : "treasure";
+  g.gearMode = scen.gearMode==="action" ? "action" : "coins";
+  g.cellarMode = scen.cellarMode==="dig" ? "dig" : "safe";
+  g.wwMode = scen.wwMode==="best" ? "best" : "copper";
+  g.envoyMode = scen.envoyMode==="card" ? "card" : "treasure";
+  g.cargoMode = scen.cargoMode==="best" ? "best" : "silver";
+  g.blockadeMode = scen.blockadeMode==="best" ? "best" : "silver";
+  g.allowEarly = !!scen.allowEarlyShuffle;
+  g.gainsRef = scen.gains;
+  g.ducatTrashFlag = scen.ducatTrash!=="off";
   // scen.crucibleMode is read directly in playTreasurePhase
   g.needPotion = !!scen.targetPotion;
   g.coffers = (scen.gains.includes("F")||scen.bakerBoard) ? 1 : 0; // Baker setup: never stacks above 1
@@ -1188,7 +1392,7 @@ function playGame(scen, target, rec){
       }
     }
     if(g.projects.includes("SL") && turn>=3){
-      const k=silosDecide(g,target);
+      const k=silosDecide(g,target,turn>=4);
       if(k>0){
         if(emit) emit("Silos: reveal and discard "+k+" Copper"+(k>1?"s":"")+" (card counting says this maximizes the hit chance), draw "+k);
         for(let d=0;d<k;d++){ removeOne(g.hand,"C"); g.discard.push("C"); }
@@ -1241,8 +1445,22 @@ function playGame(scen, target, rec){
         }
         if(turn===3) tiaraBuy(g, emit);
       }
+      // Cargo Ship: on a miss, buy a card and ship it into next turn's hand
+      let cargoSpent=0;
+      if(g.cargoAvail>0 && turn<4 && !hit && !g.gainedTarget && g.debt===0){
+        let buyC=null;
+        if(g.cargoMode==="best"){
+          const cands=["GD"].concat(g.gainsRef.filter(k2=>CARDS[k2]&&!CARDS[k2].project&&CARDS[k2].cost>=4)).concat(["S","C"]);
+          for(const k2 of cands){ if(CARDS[k2] && CARDS[k2].cost<=c && !CARDS[k2].project){ buyC=k2; break; } }
+        } else if(c>=3) buyC="S";
+        if(buyC){
+          g.setAside.push(buyC); g.cargoAvail=0; cargoSpent=CARDS[buyC].cost;
+          if(emit) emit("Cargo Ship: buy "+CARDS[buyC].name+" ($"+CARDS[buyC].cost+") and set it aside — it joins next turn's hand");
+        }
+      }
+      g.cargoAvail=0;
       if(g.projects.includes("PG")){
-        const leftover = amassLive ? c-2 : ((hit && !g.gainedTarget) ? c-target : c);
+        const leftover = (amassLive ? c-2 : ((hit && !g.gainedTarget) ? c-target : c)) - cargoSpent;
         if(leftover>=1){
           g.coffers++;
           if(emit) emit("Pageant: pay $1 of the leftover $"+leftover+" for +1 Coffers (now "+g.coffers+")");
@@ -1279,6 +1497,22 @@ function pretestDims(scen){
   if(scen.gains.includes("ST")){
     dims.push({key:"starMode", auto:(scen.starMode||"auto")==="auto", val:scen.starMode,
       vals:["copper","best"], name:{copper:"star: copper on top",best:"star: best card on top"}});
+  }
+  if(scen.gains.includes("GE") && scen.gains.some(k=>k!=="GE"&&CARDS[k]&&CARDS[k].action)){
+    dims.push({key:"gearMode", auto:(scen.gearMode||"auto")==="auto", val:scen.gearMode,
+      vals:["coins","action"], name:{coins:"gear: bank treasure",action:"gear: bank the action"}});
+  }
+  if(scen.gains.includes("CE")){
+    dims.push({key:"cellarMode", auto:(scen.cellarMode||"auto")==="auto", val:scen.cellarMode,
+      vals:["safe","dig"], name:{safe:"cellar: no early shuffle",dig:"cellar: dig freely"}});
+  }
+  if(scen.gains.includes("WW")){
+    dims.push({key:"wwMode", auto:(scen.wwMode||"auto")==="auto", val:scen.wwMode,
+      vals:["copper","best"], name:{copper:"wish: name Copper",best:"wish: name the best card"}});
+  }
+  if(scen.gains.includes("EN") && scen.gains.some(k=>k!=="EN"&&CARDS[k]&&CARDS[k].action)){
+    dims.push({key:"envoyMode", minimize:true, auto:(scen.envoyMode||"auto")==="auto", val:scen.envoyMode,
+      vals:["card","treasure"], name:{card:"envoy: opponent denies the action",treasure:"envoy: opponent denies treasure"}});
   }
   if(scen.gains.includes("AD") && scen.gains.some(k=>k!=="AD"&&CARDS[k]&&CARDS[k].action)){
     dims.push({key:"advisorMode", minimize:true, auto:(scen.advisorMode||"auto")==="auto", val:scen.advisorMode,
@@ -1385,6 +1619,7 @@ function boardFlags(){
     tfair:document.getElementById("gTFair").checked,
     targetType:document.getElementById("gTargetType").value,
     split:document.getElementById("gSplit").value,
+    allowEarlyShuffle:document.getElementById("gEarlyShuffle").checked,
   };
 }
 function flagSuffix(f){
@@ -1402,6 +1637,9 @@ function mkScen(id,label,gains,extra){
   const f=boardFlags();
   return Object.assign({id,label:label+flagSuffix(f),gains,
     alms:f.alms, amass:f.amass, bakerBoard:f.bakerBoard, tfair:f.tfair, targetType:f.targetType, split:f.split,
+    allowEarlyShuffle:f.allowEarlyShuffle,
+    cargoMode:"silver", blockadeMode:"silver", ducatTrash:"on",
+    gearMode:"auto", cellarMode:"auto", wwMode:"auto", envoyMode:"auto",
     targetPotion:currentTarget().potion,
     havenMode:"auto", starMode:"auto", advisorMode:"auto"}, extra||{});
 }
@@ -1422,7 +1660,7 @@ function buildScenarios(){
     const b=document.getElementById("cust2").value;
     const gains=[]; if(a!=="-")gains.push(a); if(b!=="-")gains.push(b);
     const nm=gains.length? gains.map(k=>CARDS[k].name).join(" + ") : "Nothing";
-    return [mkScen("custom","Custom: "+nm,gains,{havenMode:document.getElementById("custHaven").value, starMode:document.getElementById("custStar").value, advisorMode:document.getElementById("custAdvisor").value, crucibleMode:document.getElementById("custCrucible").value})];
+    return [mkScen("custom","Custom: "+nm,gains,{havenMode:document.getElementById("custHaven").value, starMode:document.getElementById("custStar").value, advisorMode:document.getElementById("custAdvisor").value, crucibleMode:document.getElementById("custCrucible").value, cargoMode:document.getElementById("custCargo").value, blockadeMode:document.getElementById("custBlockade").value, ducatTrash:document.getElementById("custDucat").value})];
   }
   if(document.getElementById("gPair").checked){
     const c=document.getElementById("pairCard").value;
@@ -1577,6 +1815,18 @@ function updateRulesNote(t){
     "Poacher: peddler cantrip (no empty supply piles in the opening, so nothing is discarded). "+
     "Shadow cards (Fishmonger, Alley) are shuffled to the bottom of the deck and can be played from the deck as if in hand - so they are effectively available every turn until drawn or played. Alley discards its worst card; Fishmonger is a terminal +$1. "+
     "Craftsman: terminal; when this turn would miss and the target costs $5 or less (and is not Potion-cost), it gains the target directly (a hit) at the price of +2 Debt, which is paid off with leftover coins before anything can be bought - including Amass. "+
+    "Cargo Ship: terminal +$2; on a missed turn it buys a Silver (or, per its option, the best affordable card) and ships it into the next hand. "+
+    "Blockade: terminal; gains a Silver (option: the opening's own card) set aside for the next hand; skipped on the last turn. "+
+    "Fool's Gold: $1 for the first, $4 for each further one this turn (a Tiara replay counts as a further play). "+
+    "Storeroom: terminal; sifts junk into draws without breaking the 5-cards-for-next-turn rule, then discards leftover junk for +$1 each. "+
+    "Skulk: never played (its value is the on-gain Gold; with Travelling Fair the Gold is what gets topdecked). "+
+    "Gear: terminal +2 cards; banks up to 2 cards for the next hand — Coppers over Estates always; treasure-vs-action banking is A/B pretested. "+
+    "Ducat: Treasure in the real game (played free at buy time for +1 Coffers); on gain it trashes a Copper by default (option to keep it). "+
+    "Candlestick Maker: +1 action, +1 buy, +1 Coffers. Experiment: +2 cards +1 action, returns to its pile; gaining one gains a second. "+
+    "Envoy: terminal reveal-5-keep-4; the opponent policy is minimax-pretested and never denies an action we could not play anyway. "+
+    "Cellar: discards Estates/Curses to redraw; 'no early shuffle' vs 'dig freely' is A/B pretested. Wishing Well: naming Copper vs the best remaining card is A/B pretested. "+
+    "Silos, Storeroom and Cellar never draw the deck below 5 cards before turn 4 unless 'allow early shuffles' is on. "+
+    "Sim cache: finished non-exact runs are stored locally; repeat runs are reused and larger runs only simulate the difference. "+
     "An Estate that a Baron in hand needs is never trashed, buried, set aside, or discarded.";
 }
 updateRulesNote(5);
@@ -1590,7 +1840,9 @@ function getPool(){
       const eng=document.getElementById("enginesrc").textContent;
       workerSrc=URL.createObjectURL(new Blob([eng+"\nonmessage=function(e){var d=e.data;postMessage({idx:d.idx,stats:runScenario(d.scen,d.target,d.n)});};"],{type:"text/javascript"}));
     }
-    const nw=Math.max(1,(navigator.hardwareConcurrency||4)-1);
+    const cores=navigator.hardwareConcurrency||4;
+    const pct=+document.getElementById("gCpu").value||60;
+    const nw=Math.min(cores, Math.max(1, Math.round(cores*pct/100)));
     pool=[];
     for(let i=0;i<nw;i++) pool.push(new Worker(workerSrc));
     return pool;
@@ -1632,14 +1884,53 @@ function runScenarios(scens, forceAppend){
       runbtn.disabled=false; document.getElementById("runAllPairs").disabled=false;
     }
   };
+  const cacheOn=document.getElementById("gCache").checked;
+  const cacheKey=(scen)=>{
+    const o={g:scen.gains.slice().sort(), t:ct.label,
+      f:[!!scen.alms,!!scen.amass,!!scen.bakerBoard,!!scen.tfair,scen.targetType,scen.split,!!scen.targetPotion,!!scen.allowEarlyShuffle],
+      m:[scen.havenMode,scen.starMode,scen.advisorMode,scen.crucibleMode,scen.cargoMode,scen.blockadeMode,scen.ducatTrash,scen.gearMode,scen.cellarMode,scen.wwMode,scen.envoyMode]};
+    return "domsim1:"+JSON.stringify(o);
+  };
+  const loadCache=(k)=>{ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(e){ return null; } };
+  const saveCache=(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} };
+  const toCounts=(st,nn)=>({n:nn,h3:st.h3*nn,h4:st.h4*nn,either:st.either*nn,both:st.both*nn,hits:st.hits*nn,s3:st.avg3*nn,s4:st.avg4*nn,note:st.note||"",resolvedScen:st.resolvedScen});
+  const fromCounts=(e)=>({h3:e.h3/e.n,h4:e.h4/e.n,either:e.either/e.n,both:e.both/e.n,hits:e.hits/e.n,avg3:e.s3/e.n,avg4:e.s4/e.n,note:e.note,resolvedScen:e.resolvedScen});
+  const mergeCounts=(a,b)=>({n:a.n+b.n,h3:a.h3+b.h3,h4:a.h4+b.h4,either:a.either+b.either,both:a.both+b.both,hits:a.hits+b.hits,s3:a.s3+b.s3,s4:a.s4+b.s4,note:b.note||a.note,resolvedScen:b.resolvedScen||a.resolvedScen});
+  // per-scenario cache plan: {key, cached, runN, runScen}
+  const plans=scens.map(scen=>{
+    if(!cacheOn) return {scen, runN:n, runScen:scen};
+    // exact-mode scenarios are free — no cache needed (checked engine-side)
+    const key=cacheKey(scen);
+    const e=loadCache(key);
+    if(e && e.n>=n) return {scen, key, cached:e, runN:0};
+    if(e) return {scen, key, cached:e, runN:n-e.n, runScen:e.resolvedScen||scen};
+    return {scen, key, runN:n, runScen:scen};
+  });
   const finished=new Set();
-  const finishIdx=(idx,stats)=>{ if(finished.has(idx))return; finished.add(idx); finishOne(scens[idx],stats); };
+  const finishIdx=(idx,stats)=>{
+    if(finished.has(idx))return; finished.add(idx);
+    const pl=plans[idx];
+    if(pl.key && stats && stats.note!==" [exact]"){
+      let counts=toCounts(stats, pl.runN);
+      if(pl.cached) counts=mergeCounts(pl.cached, counts);
+      saveCache(pl.key, counts);
+      stats=Object.assign({}, fromCounts(counts));
+    }
+    finishOne(scens[idx],stats);
+  };
+  // resolve fully-cached scenarios immediately
+  const pending=[];
+  plans.forEach((pl,idx)=>{
+    if(pl.runN===0){ finishIdx(idx, fromCounts(pl.cached)); }
+    else pending.push(idx);
+  });
+  if(pending.length===0) return;
   const runSyncRemaining=async ()=>{
-    for(let i=0;i<scens.length;i++){
+    for(const i of pending){
       if(finished.has(i)) continue;
       progress.textContent="running: "+scens[i].label+" \u2026";
       await new Promise(r=>setTimeout(r,15));
-      finishIdx(i, runScenario(scens[i],t,n));
+      finishIdx(i, runScenario(plans[i].runScen||scens[i],t,plans[i].runN));
     }
   };
   const p=getPool();
@@ -1648,11 +1939,11 @@ function runScenarios(scens, forceAppend){
     let next=0, failed=false;
     const fail=()=>{ if(failed)return; failed=true; try{for(const w of p)w.terminate();}catch(e){} pool=null; runSyncRemaining(); };
     const feed=(w)=>{
-      if(failed || next>=scens.length) return;
-      const idx=next++;
+      if(failed || next>=pending.length) return;
+      const idx=pending[next++];
       w.onmessage=(e)=>{ finishIdx(e.data.idx, e.data.stats); feed(w); };
       w.onerror=fail;
-      try{ w.postMessage({idx, scen:scens[idx], target:t, n}); }catch(err){ fail(); }
+      try{ w.postMessage({idx, scen:plans[idx].runScen||scens[idx], target:t, n:plans[idx].runN}); }catch(err){ fail(); }
     };
     for(const w of p) feed(w);
     setTimeout(()=>{ if(finished.size===0) fail(); }, 4000);
@@ -1670,18 +1961,22 @@ function pairScen(a,b){
   return mkScen("ap_"+a+"_"+b, CARDS[a].name+" + "+CARDS[b].name, [a,b]);
 }
 function runPairSet(pairs){
+  if(!document.getElementById("gAppend").checked){ lastRows=[]; renderRows(); }
   const ct=currentTarget();
   const f=boardFlags();
   const legalOnly=document.getElementById("gPairLegal").checked;
+  const seen=new Set();
   const scens=[];
   for(const [a,b] of pairs){
     if(a===b && CARDS[a] && CARDS[a].project) continue;
     const sc=pairScen(a,b);
     if(legalOnly && acquiredCount(sc.gains,f,(f.bakerBoard?1:0))<dedupeGains(sc.gains).length) continue;
+    if(seen.has(sc.label)) continue;
+    seen.add(sc.label);
     if(lastRows.some(r=>r.baseLabel===sc.label && r.targetLabel===ct.label)) continue;
     scens.push(sc);
   }
-  runScenarios(scens, true); // always appends
+  runScenarios(scens, true); // table already cleared above if append is off
 }
 document.getElementById("runAllPairs").addEventListener("click", ()=>{
   const cards=["-"].concat(pickableNow()); // Nothing counts as a card
@@ -1691,6 +1986,22 @@ document.getElementById("runAllPairs").addEventListener("click", ()=>{
 });
 document.getElementById("runSelfPairs").addEventListener("click", ()=>{
   runPairSet(pickableNow().map(c=>[c,c]));
+});
+document.getElementById("runMatrix").addEventListener("click", ()=>{
+  const a=document.getElementById("cust1").value, b=document.getElementById("cust2").value;
+  runPairSet([[a,a],[a,b],[b,b]]);
+});
+document.getElementById("gCpu").addEventListener("input", ()=>{
+  document.getElementById("gCpuVal").textContent=document.getElementById("gCpu").value+"%";
+  if(pool){ try{for(const w of pool)w.terminate();}catch(e){} pool=null; }
+});
+document.getElementById("clearCache").addEventListener("click", ()=>{
+  try{
+    const del=[];
+    for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&k.startsWith("domsim1:")) del.push(k); }
+    for(const k of del) localStorage.removeItem(k);
+    progress.textContent="cache cleared ("+del.length+" entries)";
+  }catch(e){ progress.textContent="cache unavailable"; }
 });
 
 /* ================= controls wiring ================= */
@@ -1716,6 +2027,9 @@ function updateHavenVis(){
   document.getElementById("starOptWrap").style.display = (v1==="ST"||v2==="ST") ? "" : "none";
   document.getElementById("advOptWrap").style.display = (v1==="AD"||v2==="AD") ? "" : "none";
   document.getElementById("cruOptWrap").style.display = (v1==="CR"||v2==="CR") ? "" : "none";
+  document.getElementById("cargoOptWrap").style.display = (v1==="CS"||v2==="CS") ? "" : "none";
+  document.getElementById("blockOptWrap").style.display = (v1==="BL"||v2==="BL") ? "" : "none";
+  document.getElementById("ducatOptWrap").style.display = (v1==="DU"||v2==="DU") ? "" : "none";
 }
 document.getElementById("cust1").value="S";
 document.getElementById("cust2").value="S";
@@ -1743,6 +2057,7 @@ document.getElementById("gCustom").addEventListener("change",e=>{
 });
 document.getElementById("gPair").addEventListener("change",e=>{
   document.getElementById("pairBox").classList.toggle("on", e.target.checked);
+  document.getElementById("runAllPairs").style.display = e.target.checked ? "none" : "";
   if(e.target.checked){
     const c1=document.getElementById("cust1").value;
     const sel=document.getElementById("pairCard");
@@ -1751,7 +2066,7 @@ document.getElementById("gPair").addEventListener("change",e=>{
   if(e.target.checked){ document.getElementById("gCustom").checked=false; document.getElementById("customBox").classList.remove("on"); document.getElementById("customnote").style.display="none"; }
   refreshWatchScenarios();
 });
-for(const id of ["gSilver","gSolo","cust1","cust2","custHaven","custStar","custAdvisor","custCrucible","pairCard","gPairLegal","gAlms","gAmass","gBaker","gTFair","gTargetType"]){
+for(const id of ["gSilver","gSolo","cust1","cust2","custHaven","custStar","custAdvisor","custCrucible","custCargo","custBlockade","custDucat","pairCard","gPairLegal","gAlms","gAmass","gBaker","gTFair","gTargetType","gEarlyShuffle"]){
   document.getElementById(id).addEventListener("change",refreshWatchScenarios);
 }
 for(const id of ["gSplit","gFishAlways"]){
