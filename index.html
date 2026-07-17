@@ -661,7 +661,7 @@ function playActions(g, target, emit){
           if(!deny && g.advisorMode==="card"){
             deny=looked.find(x=>CARDS[x].action);
           }
-          if(!deny){ for(const w of ["S","C","Q"]) if(looked.includes(w)){ deny=w; break; } }
+          if(!deny){ for(const w of ["GD","S","SK","GO","CR","FG","DU","SU","BA","C","Q"]) if(looked.includes(w)){ deny=w; break; } }
           if(!deny) deny=looked.find(x=>CARDS[x].action);
           if(!deny) deny=looked[0];
           removeOne(looked,deny); g.discard.push(deny);
@@ -1027,7 +1027,7 @@ function playActions(g, target, emit){
           if(!deny && g.envoyMode==="card" && (actions>0||g.villagers>0)){
             deny=looked.find(x=>CARDS[x].action); // only worth denying if we could still play it
           }
-          if(!deny){ for(const w of ["S","FG","C","Q"]) if(looked.includes(w)){ deny=w; break; } }
+          if(!deny){ for(const w of ["GD","S","SK","GO","CR","FG","DU","SU","BA","C","Q"]) if(looked.includes(w)){ deny=w; break; } }
           if(!deny) deny=looked[0];
           removeOne(looked,deny); g.discard.push(deny);
           g.hand.push(...looked);
@@ -1641,7 +1641,32 @@ function pretestDims(scen){
 }
 function resolveScenario(scen, target, pretestN){
   const dims=pretestDims(scen);
-  if(dims.length===0) return {scen, note:""};
+  // manual, non-default settings are always shown in the label (and so become separate rows)
+  const MODE_NOTES=[
+    {card:"EN",key:"envoyMode",def:"treasure",name:{card:"envoy: opponent denies the action",treasure:"envoy: opponent denies treasure"}},
+    {card:"AD",key:"advisorMode",def:"treasure",name:{card:"advisor: opponent denies the action",treasure:"advisor: opponent denies treasure"}},
+    {card:"H",key:"havenMode",def:"coins",name:{coins:"haven: bank treasure",action:"haven: bank action"}},
+    {card:"ST",key:"starMode",def:"best",name:{copper:"star: copper on top",best:"star: best card on top"}},
+    {card:"GE",key:"gearMode",def:"coins",name:{coins:"gear: bank treasure",action:"gear: bank the action"}},
+    {card:"WW",key:"wwMode",def:"copper",name:{copper:"wish: name Copper",best:"wish: name the best card"}},
+    {card:"CR",key:"crucibleMode",def:"off",name:{on:"crucible: may trash the gained card"}},
+    {card:"SV",key:"salvagerMode",def:"off",name:{on:"salvager: may trash the gained card"}},
+    {card:"CS",key:"cargoMode",def:"silver",name:{best:"cargo: ships the best affordable card"}},
+    {card:"BL",key:"blockadeMode",def:"silver",name:{best:"blockade: gains the opening's card"}},
+    {card:"DU",key:"ducatTrash",def:"on",name:{off:"ducat: keeps the Copper"}},
+    {card:"BA",key:"baubleMode",def:"silver",name:{off:"bauble: no Silver topdeck"}},
+  ];
+  const extras=[];
+  const AB_KEYS={envoyMode:1,advisorMode:1,havenMode:1,starMode:1,gearMode:1,wwMode:1};
+  for(const m of MODE_NOTES){
+    if(!scen.gains.includes(m.card)) continue;
+    if(dims.some(d=>d.key===m.key)) continue; // pretested dims already produce their own note
+    const v=scen[m.key];
+    if(v && v!=="auto" && v!==m.def && m.name[v]) extras.push(m.name[v]);
+    else if(AB_KEYS[m.key] && m.name[m.def]) extras.push(m.name[m.def]); // A/B cards always state the behavior in effect
+  }
+  const extraNote = extras.length ? " ["+extras.join(", ")+"]" : "";
+  if(dims.length===0) return {scen, note:extraNote};
   const expand=(ds)=>{
     let combos=[{}];
     for(const d of ds){
@@ -1667,7 +1692,7 @@ function resolveScenario(scen, target, pretestN){
     if(!bestOuter || bestInner.hits<bestOuter.hits) bestOuter=bestInner;
   }
   const bestCombo=bestOuter.combo;
-  const note=" ["+dims.map(d=>d.name[bestCombo[d.key]]).join(", ")+"]";
+  const note=" ["+dims.map(d=>d.name[bestCombo[d.key]]).join(", ")+"]"+extraNote;
   return {scen:Object.assign({},scen,bestCombo), note};
 }
 /* Exact combinatorics for decision-free openings (only plain S/C/E/X gains,
@@ -1784,7 +1809,7 @@ function buildScenarios(){
     const b=document.getElementById("cust2").value;
     const gains=[]; if(a!=="-")gains.push(a); if(b!=="-")gains.push(b);
     const nm=gains.length? gains.map(k=>CARDS[k].name).join(" + ") : "Nothing";
-    return [mkScen("custom","Custom: "+nm,gains,{havenMode:document.getElementById("custHaven").value, starMode:document.getElementById("custStar").value, advisorMode:document.getElementById("custAdvisor").value, crucibleMode:document.getElementById("custCrucible").value, cargoMode:document.getElementById("custCargo").value, blockadeMode:document.getElementById("custBlockade").value, ducatTrash:document.getElementById("custDucat").value, gearMode:document.getElementById("custGear").value, wwMode:document.getElementById("custWW").value, envoyMode:document.getElementById("custEnvoy").value, baubleMode:document.getElementById("custBauble").value, salvagerMode:document.getElementById("custSalvager").value})];
+    return [mkScen("custom","Custom: "+nm,gains,overridesFor(gains))];
   }
   if(document.getElementById("gPair").checked){
     const c=document.getElementById("pairCard").value;
@@ -1797,7 +1822,7 @@ function buildScenarios(){
       const gains = p==="-" ? [c] : [c,p];
       if(legalOnly && acquiredCount(gains,f)<gains.length) continue;
       const label = p==="-" ? CARDS[c].name+" only" : CARDS[c].name+" + "+CARDS[p].name;
-      list.push(mkScen("pr_"+c+"_"+p, label, gains));
+      list.push(mkScen("pr_"+c+"_"+p, label, gains, overridesFor(gains)));
     }
     return list;
   }
@@ -2094,7 +2119,7 @@ function pairScen(a,b){
     const c=a==="-"?b:a;
     return mkScen("ap_-_"+c, CARDS[c].name+" only", [c]);
   }
-  return mkScen("ap_"+a+"_"+b, CARDS[a].name+" + "+CARDS[b].name, [a,b]);
+  return mkScen("ap_"+a+"_"+b, CARDS[a].name+" + "+CARDS[b].name, [a,b], overridesFor([a,b]));
 }
 function runPairSet(pairs){
   if(!document.getElementById("gAppend").checked){ lastRows=[]; renderRows(); }
@@ -2157,20 +2182,27 @@ function refillAllSelects(){
   fillCardSelect(document.getElementById("pairCard"),false);
 }
 refillAllSelects();
+function overridesFor(gains){
+  const o={};
+  const map={H:["havenMode","custHaven"],ST:["starMode","custStar"],AD:["advisorMode","custAdvisor"],CR:["crucibleMode","custCrucible"],CS:["cargoMode","custCargo"],BL:["blockadeMode","custBlockade"],DU:["ducatTrash","custDucat"],GE:["gearMode","custGear"],WW:["wwMode","custWW"],EN:["envoyMode","custEnvoy"],BA:["baubleMode","custBauble"],SV:["salvagerMode","custSalvager"]};
+  for(const k in map) if(gains.includes(k)) o[map[k][0]]=document.getElementById(map[k][1]).value;
+  return o;
+}
 function updateHavenVis(){
-  const v1=document.getElementById("cust1").value, v2=document.getElementById("cust2").value;
-  document.getElementById("havenOptWrap").style.display = (v1==="H"||v2==="H") ? "" : "none";
-  document.getElementById("starOptWrap").style.display = (v1==="ST"||v2==="ST") ? "" : "none";
-  document.getElementById("advOptWrap").style.display = (v1==="AD"||v2==="AD") ? "" : "none";
-  document.getElementById("cruOptWrap").style.display = (v1==="CR"||v2==="CR") ? "" : "none";
-  document.getElementById("cargoOptWrap").style.display = (v1==="CS"||v2==="CS") ? "" : "none";
-  document.getElementById("blockOptWrap").style.display = (v1==="BL"||v2==="BL") ? "" : "none";
-  document.getElementById("ducatOptWrap").style.display = (v1==="DU"||v2==="DU") ? "" : "none";
-  document.getElementById("gearOptWrap").style.display = (v1==="GE"||v2==="GE") ? "" : "none";
-  document.getElementById("wwOptWrap").style.display = (v1==="WW"||v2==="WW") ? "" : "none";
-  document.getElementById("envoyOptWrap").style.display = (v1==="EN"||v2==="EN") ? "" : "none";
-  document.getElementById("baubleOptWrap").style.display = (v1==="BA"||v2==="BA") ? "" : "none";
-  document.getElementById("salvOptWrap").style.display = (v1==="SV"||v2==="SV") ? "" : "none";
+  const v1=document.getElementById("cust1").value, v2=document.getElementById("cust2").value,
+        vp=document.getElementById("gPair").checked ? document.getElementById("pairCard").value : "";
+  document.getElementById("havenOptWrap").style.display = (v1==="H"||v2==="H"||vp==="H") ? "" : "none";
+  document.getElementById("starOptWrap").style.display = (v1==="ST"||v2==="ST"||vp==="ST") ? "" : "none";
+  document.getElementById("advOptWrap").style.display = (v1==="AD"||v2==="AD"||vp==="AD") ? "" : "none";
+  document.getElementById("cruOptWrap").style.display = (v1==="CR"||v2==="CR"||vp==="CR") ? "" : "none";
+  document.getElementById("cargoOptWrap").style.display = (v1==="CS"||v2==="CS"||vp==="CS") ? "" : "none";
+  document.getElementById("blockOptWrap").style.display = (v1==="BL"||v2==="BL"||vp==="BL") ? "" : "none";
+  document.getElementById("ducatOptWrap").style.display = (v1==="DU"||v2==="DU"||vp==="DU") ? "" : "none";
+  document.getElementById("gearOptWrap").style.display = (v1==="GE"||v2==="GE"||vp==="GE") ? "" : "none";
+  document.getElementById("wwOptWrap").style.display = (v1==="WW"||v2==="WW"||vp==="WW") ? "" : "none";
+  document.getElementById("envoyOptWrap").style.display = (v1==="EN"||v2==="EN"||vp==="EN") ? "" : "none";
+  document.getElementById("baubleOptWrap").style.display = (v1==="BA"||v2==="BA"||vp==="BA") ? "" : "none";
+  document.getElementById("salvOptWrap").style.display = (v1==="SV"||v2==="SV"||vp==="SV") ? "" : "none";
 }
 document.getElementById("cust1").value="S";
 document.getElementById("cust2").value="S";
@@ -2199,6 +2231,7 @@ document.getElementById("gCustom").addEventListener("change",e=>{
 document.getElementById("gPair").addEventListener("change",e=>{
   document.getElementById("pairBox").classList.toggle("on", e.target.checked);
   document.getElementById("runAllPairs").style.display = e.target.checked ? "none" : "";
+  updateHavenVis();
   if(e.target.checked){
     const c1=document.getElementById("cust1").value;
     const sel=document.getElementById("pairCard");
