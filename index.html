@@ -147,16 +147,13 @@ input[type=range]{accent-color:var(--gold)}
     </div>
     <div class="grouprow">
       <span class="tag">Openings</span>
-      <label><input type="checkbox" id="gSilver" checked> <span id="silverGroupLabel">Silver + card</span></label>
-      <label id="soloWrap"><input type="checkbox" id="gSolo" checked> Card only</label>
       <label><input type="checkbox" id="gPair"> Pair one card with all</label>
       <span class="subbox" id="pairBox">
         <select id="pairCard"></select>
         <label><input type="checkbox" id="gPairLegal" checked> skip illegal pairings</label>
       </span>
       <button id="runAllPairs" class="ghost" title="Run every possible two-card opening (skips pairs already in the table)">Run every pair</button>
-      <label><input type="checkbox" id="gCustom"> Custom only</label>
-      <span class="subbox" id="customBox">
+      <span class="subbox on" id="customBox">
         <select id="cust1"></select>
         <select id="cust2"></select>
         <button class="ghost" id="custSame" type="button" title="Set both picks to the first card">&times;2 same card</button>
@@ -270,7 +267,7 @@ input[type=range]{accent-color:var(--gold)}
       <summary>Play rules used on T3/T4</summary>
       <p class="note" id="rulesnote"></p>
     </details>
-    <p class="note" id="customnote" style="display:none">Notes: on a 3/4 opening only one of turns 1/2 has $4. With Alms the $3 turn can gain a card costing up to $4; with Amass either turn can gain an Action costing up to $5 (5-costs like Baker are otherwise unbuyable in the opening). Terminals (Baron, Smithy) are limited to one play per turn.</p>
+    <p class="note" id="customnote">Notes: on a 3/4 opening only one of turns 1/2 has $4. With Alms the $3 turn can gain a card costing up to $4; with Amass either turn can gain an Action costing up to $5 (5-costs like Baker are otherwise unbuyable in the opening). Terminals (Baron, Smithy) are limited to one play per turn.</p>
   </section>
 
   <section>
@@ -1804,14 +1801,14 @@ function pickableNow(){
   return currentTarget().potion ? ["PO"].concat(base) : base;
 }
 function buildScenarios(){
-  if(document.getElementById("gCustom").checked){
+  if(!document.getElementById("gPair").checked){
     const a=document.getElementById("cust1").value;
     const b=document.getElementById("cust2").value;
     const gains=[]; if(a!=="-")gains.push(a); if(b!=="-")gains.push(b);
     const nm=gains.length? gains.map(k=>CARDS[k].name).join(" + ") : "Nothing";
-    return [mkScen("custom","Custom: "+nm,gains,overridesFor(gains))];
+    return [mkScen("custom",nm,gains,overridesFor(gains))];
   }
-  if(document.getElementById("gPair").checked){
+  {
     const c=document.getElementById("pairCard").value;
     const legalOnly=document.getElementById("gPairLegal").checked;
     const f=boardFlags();
@@ -1826,23 +1823,6 @@ function buildScenarios(){
     }
     return list;
   }
-  const tp=currentTarget().potion;
-  const anchor = tp ? "PO" : "S"; // a Potion-cost target needs a Potion in the opening
-  const anchorName = CARDS[anchor].name;
-  const list = tp ? [
-    mkScen("none","Nothing",[]),
-    mkScen("po","Potion",["PO"]),
-    mkScen("pos","Potion + Silver",["PO","S"]),
-  ] : [
-    mkScen("none","Nothing",[]),
-    mkScen("s","Silver",["S"]),
-    mkScen("ss","Silver + Silver",["S","S"]),
-  ];
-  if(document.getElementById("gSilver").checked)
-    for(const c of openCardsNow()) list.push(mkScen("s_"+c,anchorName+" + "+CARDS[c].name,[anchor,c]));
-  if(document.getElementById("gSolo").checked)
-    for(const c of openCardsNow()) list.push(mkScen("o_"+c,CARDS[c].name+" only",[c]));
-  return list;
 }
 
 /* ================= results table ================= */
@@ -2210,7 +2190,6 @@ document.getElementById("pairCard").value="H";
 updateHavenVis();
 document.getElementById("cust1").addEventListener("change",updateHavenVis);
 document.getElementById("cust2").addEventListener("change",updateHavenVis);
-document.getElementById("gCustom").addEventListener("change",updateHavenVis);
 document.getElementById("custSame").addEventListener("click",updateHavenVis);
 document.getElementById("coggle").addEventListener("click",()=>{
   const r=document.getElementById("cogrow");
@@ -2222,14 +2201,9 @@ document.getElementById("custSame").addEventListener("click",()=>{
   document.getElementById("cust2").value=document.getElementById("cust1").value;
   refreshWatchScenarios();
 });
-document.getElementById("gCustom").addEventListener("change",e=>{
-  document.getElementById("customBox").classList.toggle("on", e.target.checked);
-  if(e.target.checked){ document.getElementById("gPair").checked=false; document.getElementById("pairBox").classList.remove("on"); }
-  document.getElementById("customnote").style.display = e.target.checked ? "block":"none";
-  refreshWatchScenarios();
-});
 document.getElementById("gPair").addEventListener("change",e=>{
   document.getElementById("pairBox").classList.toggle("on", e.target.checked);
+  document.getElementById("customBox").classList.toggle("on", !e.target.checked); // custom is on whenever pair mode is off
   document.getElementById("runAllPairs").style.display = e.target.checked ? "none" : "";
   updateHavenVis();
   if(e.target.checked){
@@ -2237,10 +2211,9 @@ document.getElementById("gPair").addEventListener("change",e=>{
     const sel=document.getElementById("pairCard");
     if(c1!=="-" && [...sel.options].some(o=>o.value===c1)) sel.value=c1;
   }
-  if(e.target.checked){ document.getElementById("gCustom").checked=false; document.getElementById("customBox").classList.remove("on"); document.getElementById("customnote").style.display="none"; }
   refreshWatchScenarios();
 });
-for(const id of ["gSilver","gSolo","cust1","cust2","custHaven","custStar","custAdvisor","custCrucible","custCargo","custBlockade","custDucat","custGear","custWW","custEnvoy","custBauble","custSalvager","pairCard","gPairLegal","gAlms","gAmass","gBaker","gTFair","gTargetType","gEarlyShuffle"]){
+for(const id of ["cust1","cust2","custHaven","custStar","custAdvisor","custCrucible","custCargo","custBlockade","custDucat","custGear","custWW","custEnvoy","custBauble","custSalvager","pairCard","gPairLegal","gAlms","gAmass","gBaker","gTFair","gTargetType","gEarlyShuffle"]){
   document.getElementById(id).addEventListener("change",refreshWatchScenarios);
 }
 for(const id of ["gSplit","gFishAlways","gSort"]){
@@ -2429,14 +2402,7 @@ document.getElementById("wstep").addEventListener("click",()=>{
 });
 document.getElementById("wnew").addEventListener("click",()=>{ stopPlay(); newWatchGame(); document.getElementById("wstatus").textContent="New game ready \u2014 press Play or Step."; });
 wscen.addEventListener("change",()=>{ watchScenOverride=null; stopPlay(); frames=[]; fi=0; wlog.innerHTML=""; if(document.getElementById("wstack").checked) rebuildStack(); });
-function updatePotionUI(){
-  const tp=currentTarget().potion;
-  const solo=document.getElementById("gSolo");
-  if(tp){ solo.checked=false; }
-  solo.disabled=tp;
-  document.getElementById("soloWrap").style.opacity = tp ? .45 : 1;
-  document.getElementById("silverGroupLabel").textContent = tp ? "Potion + card" : "Silver + card";
-}
+function updatePotionUI(){ /* Potion availability is handled inside the card lists */ }
 updatePotionUI();
 document.getElementById("target").addEventListener("change",()=>{ updatePotionUI(); refillAllSelects(); updateHavenVis(); refreshWatchScenarios(); });
 </script>
