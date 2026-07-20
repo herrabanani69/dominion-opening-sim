@@ -157,6 +157,8 @@ input[type=range]{accent-color:var(--gold)}
         <select id="cust1"></select>
         <select id="cust2"></select>
         <button class="ghost" id="custSame" type="button" title="Set both picks to the first card">&times;2 same card</button>
+      </span>
+      <span id="optBox">
         <label id="havenOptWrap" title="Only matters when Haven opens with another action card">Haven:
           <select id="custHaven">
             <option value="auto">auto (pretest 10k each)</option>
@@ -191,6 +193,9 @@ input[type=range]{accent-color:var(--gold)}
         </label>
         <label id="baubleOptWrap" title="Bauble's topdeck option on a missed turn">Bauble:
           <select id="custBauble"><option value="silver">buy + topdeck a Silver on a miss</option><option value="off">never buy the Silver</option></select>
+        </label>
+        <label id="bonfOptWrap" title="How many played Coppers Bonfire trashes">Bonfire:
+          <select id="custBonfire"><option value="2">trash 2 Coppers</option><option value="1">trash only 1 Copper</option></select>
         </label>
         <label id="salvOptWrap" title="May Salvager trash the other gained card when that reaches the target?">Salvager:
           <select id="custSalvager"><option value="off">only trashes Estates</option><option value="on">may trash the gained card to hit</option></select>
@@ -228,6 +233,7 @@ input[type=range]{accent-color:var(--gold)}
         </select>
       </label>
       <label title="Fisherman costs $2 on turn 1 (empty discard), which plays out completely differently on 3/4 vs 4/3 - so it only appears when a single split is selected."><input type="checkbox" id="gFishAlways"> always show Fisherman</label>
+      <label title="On a missed turn 3 with $4+, buy a Silk Merchant regardless of the opening - its on-gain Coffer and Villager help turn 4."><input type="checkbox" id="gBuySilk"> buy Silk Merchant when target isn't hit</label>
       <label>Card order:
         <select id="gSort"><option value="cost">by cost</option><option value="alpha">alphabetical</option></select>
       </label>
@@ -352,7 +358,7 @@ const CARDS = {
   AL:{name:"Alley",         cost:4, coin:0, cls:"A", action:true, plusA:1, shadow:true},
   CM:{name:"Craftsman",     cost:3, coin:0, cls:"A", action:true, plusA:0},
   CS:{name:"Cargo Ship",    cost:3, coin:0, cls:"D", action:true, plusA:0, duration:true},
-  BL:{name:"Blockade",      cost:3, coin:0, cls:"D", action:true, plusA:0, duration:true},
+  BL:{name:"Blockade",      cost:4, coin:0, cls:"D", action:true, plusA:0, duration:true},
   FG:{name:"Fool's Gold",   cost:2, coin:0, cls:"H", treasure:true},
   SR:{name:"Storeroom",     cost:3, coin:0, cls:"A", action:true, plusA:0},
   KS:{name:"Skulk",         cost:4, coin:0, cls:"A", action:true, plusA:0},
@@ -368,6 +374,8 @@ const CARDS = {
   CO:{name:"Courier",       cost:4, coin:0, cls:"A", action:true, plusA:0},
   DG:{name:"Dungeon",       cost:3, coin:0, cls:"D", action:true, plusA:1, duration:true},
   SV:{name:"Salvager",      cost:4, coin:0, cls:"A", action:true, plusA:0},
+  XP:{name:"Exploration",   cost:4, coin:0, cls:"PR", project:true},
+  BF:{name:"Bonfire",       cost:3, coin:0, cls:"PR", event:true},
   WE:{name:"Wedding",       cost:4, coin:0, cls:"PR", event:true},
   AS:{name:"Asceticism",    cost:3, coin:0, cls:"PR", event:true},
   PG:{name:"Pageant",       cost:3, coin:0, cls:"PR", project:true},
@@ -376,7 +384,7 @@ const CARDS = {
   SN:{name:"Sinister Plot", cost:4, coin:0, cls:"PR", project:true},
 };
 const BAD_CARDS=["C","E","X"];
-const OPEN_CARDS = ["V","R","T","D","MO","SU","FI","FG","DU","CD","CE","BA","H","L","W","G","K","Z","CH","SK","CM","CS","BL","SR","GE","EX","WW","DG","AS","PG","ST","B","M","P","A","I","Y","N","O","U","J","AD","IM","MG","PT","BH","CR","GO","PC","AL","KS","EN","CO","SV","SL","SN","F","FM","WE"];
+const OPEN_CARDS = ["V","R","T","D","MO","SU","FI","FG","DU","CD","CE","BA","H","L","W","G","K","Z","CH","SK","CM","CS","SR","GE","EX","WW","DG","AS","BF","PG","ST","B","M","P","A","I","Y","N","O","U","J","AD","IM","MG","PT","BH","CR","GO","PC","AL","KS","EN","CO","SV","BL","XP","SL","SN","F","FM","WE"];
 const PICKABLE   = ["S"].concat(OPEN_CARDS);
 
 /* ================= engine =================
@@ -932,7 +940,7 @@ function playActions(g, target, emit){
               if(spareEstate(g)){ sa="E"; why="exactly at target ($"+eff+"): set aside an Estate"; }
               else { sa=treasureIn(g,TREAS_ASC)||pickWorst(g.hand); why="exactly at target but no spare Estate: forced"; }
             } else {
-              sa = treasureIn(g,TREAS_DESC);
+              sa = treasureIn(g, g.needPotion? ["PO","S","C","Q"] : TREAS_DESC);
               if(sa) why="under target ($"+eff+"): bank the biggest treasure for next turn";
               else if(spareEstate(g)){ sa="E"; why="under target, no treasure"; }
               else { sa=pickWorst(g.hand); why="forced"; }
@@ -1052,7 +1060,7 @@ function playActions(g, target, emit){
           while(banked.length<2){
             let t=null;
             if(eff>target) t=largestTreasureKeeping(g,target,eff);
-            else if(eff<target) t=treasureIn(g,TREAS_DESC);
+            else if(eff<target) t=treasureIn(g, g.needPotion? ["PO","S","C","Q"] : TREAS_DESC);
             if(!t) break;
             removeOne(g.hand,t); g.setAside.push(t); banked.push(t); eff-=CARDS[t].coin;
           }
@@ -1138,7 +1146,8 @@ function playActions(g, target, emit){
         if(lastTurn){ if(emit) emit("Blockade stays in hand (last simulated turn, its gain would arrive too late)"); break; }
         removeOne(g.hand,"BL"); g.duration.push("BL");
         let gainC="S";
-        if(g.blockadeMode==="best" && g.gainsRef){
+        if(g.needPotion && !g.deck.includes("PO")) gainC="PO"; // the drawn Potion cannot reach turn 4 otherwise
+        else if(g.blockadeMode==="best" && g.gainsRef){
           for(const k2 of g.gainsRef){ // the opening's own card, if it is a gainable <= $4 non-project
             if(CARDS[k2] && !CARDS[k2].project && CARDS[k2].cost<=4 && CARDS[k2].cost>=3 && (CARDS[k2].action||CARDS[k2].treasure) && k2!=="BL"){ gainC=k2; break; }
           }
@@ -1264,6 +1273,12 @@ function execBuy(g, entry, hadGains, emit, tfair){
       if(emit) emit("buy Wedding ($4 + 3 Debt, +1 VP): gain a Gold");
       if(tfair && (handCoins(g)-spentMoney)>=2){ g.deck.push("GD"); spentMoney+=2; if(emit) emit("Travelling Fair: the Gold goes onto the deck"); }
       else g.discard.push("GD");
+    }
+    if(pick.card==="BF"){
+      const n = g.bonfireN===1 ? 1 : 2;
+      let tr=0;
+      for(let i2=0;i2<n;i2++) if(removeOne(g.hand,"C")){ g.trash.push("C"); tr++; }
+      if(emit) emit("buy Bonfire ($3): trash "+tr+" Copper"+(tr!==1?"s":"")+" from play");
     }
     if(pick.card==="AS"){
       if(removeOne(g.hand,"E")){ g.trash.push("E"); if(emit) emit("buy Asceticism ($2 + pay $1): trash an Estate from hand"); }
@@ -1444,6 +1459,7 @@ function playGame(scen, target, rec){
   g.baubleMode = scen.baubleMode==="off" ? "off" : "silver";
   g.salvagerMode = scen.salvagerMode==="on" ? "on" : "off";
   g.stackT3 = scen.stackT3||null;
+  g.bonfireN = scen.bonfireN==="1"||scen.bonfireN===1 ? 1 : 2;
   // scen.crucibleMode is read directly in playTreasurePhase
   g.needPotion = !!scen.targetPotion;
   g.coffers = (scen.gains.includes("F")||scen.bakerBoard) ? 1 : 0; // Baker setup: never stacks above 1
@@ -1524,6 +1540,14 @@ function playGame(scen, target, rec){
         g.coffers++;
         if(emit) emit("Pageant: pay $1 of the leftover $"+(handCoins(g)-spent)+" for +1 Coffers (now "+g.coffers+")");
       }
+      {
+        const pk=plan[turn-1]&&plan[turn-1].pick;
+        const gainedCard = pk && (pk.card==="WE" || (!CARDS[pk.card].project && !CARDS[pk.card].event));
+        if(g.projects.includes("XP") && !gainedCard){
+          g.coffers++; g.villagers++;
+          if(emit) emit("Exploration: no card gained this buy phase -> +1 Coffers, +1 Villager (now "+g.coffers+" / "+g.villagers+")");
+        }
+      }
       cleanup(g);
       if(emit) emit("clean-up");
     } else {
@@ -1563,6 +1587,14 @@ function playGame(scen, target, rec){
       }
       // Cargo Ship / Bauble: on a miss, buy a Silver for next turn (one extra buy total)
       let cargoSpent=0;
+      if(scen.buySilk && turn<4 && !hit && !g.gainedTarget && g.debt===0 && c>=4){
+        g.coffers++; g.villagers++; cargoSpent=4;
+        let dest="discard pile";
+        if(g.cargoAvail>0){ g.setAside.push("J"); g.cargoAvail=0; dest="Cargo Ship (to next hand)"; }
+        else if(g.baubleAvail && g.baubleMode!=="off"){ g.deck.push("J"); dest="top of the deck (Bauble)"; }
+        else g.discard.push("J");
+        if(emit) emit("miss with $"+c+": buy a Silk Merchant ($4) -> "+dest+"; on-gain +1 Coffers, +1 Villager (now "+g.coffers+" / "+g.villagers+")");
+      }
       if(g.baubleAvail && g.baubleMode!=="off" && g.cargoAvail===0 && turn<4 && !hit && !g.gainedTarget && g.debt===0 && c>=3){
         g.deck.push("S"); cargoSpent=3;
         if(emit) emit("Bauble: buy a Silver ($3) and put it onto the deck (drawn next turn)");
@@ -1585,6 +1617,10 @@ function playGame(scen, target, rec){
           g.coffers++;
           if(emit) emit("Pageant: pay $1 of the leftover $"+leftover+" for +1 Coffers (now "+g.coffers+")");
         }
+      }
+      if(g.projects.includes("XP") && !((hit && !g.gainedTarget) || cargoSpent>0)){
+        g.coffers++; g.villagers++;
+        if(emit) emit("Exploration: no card gained this buy phase -> +1 Coffers, +1 Villager (now "+g.coffers+" / "+g.villagers+")");
       }
       if(turn===3){ g.t3=c; g.hit3=hit; } else { g.t4=c; g.hit4=hit; }
       cleanup(g);
@@ -1652,6 +1688,7 @@ function resolveScenario(scen, target, pretestN){
     {card:"BL",key:"blockadeMode",def:"silver",name:{best:"blockade: gains the opening's card"}},
     {card:"DU",key:"ducatTrash",def:"on",name:{off:"ducat: keeps the Copper"}},
     {card:"BA",key:"baubleMode",def:"silver",name:{off:"bauble: no Silver topdeck"}},
+    {card:"BF",key:"bonfireN",def:"2",name:{"1":"bonfire: trash only 1 Copper"}},
   ];
   const extras=[];
   const AB_KEYS={envoyMode:1,advisorMode:1,havenMode:1,starMode:1,gearMode:1,wwMode:1};
@@ -1695,7 +1732,7 @@ function resolveScenario(scen, target, pretestN){
 /* Exact combinatorics for decision-free openings (only plain S/C/E/X gains,
    no events, no potion): enumerate the multivariate hypergeometric T3xT4 deal. */
 function exactEligible(scen){
-  if(scen.alms||scen.amass||scen.tfair||scen.bakerBoard||scen.targetPotion) return false;
+  if(scen.alms||scen.amass||scen.tfair||scen.bakerBoard||scen.targetPotion||scen.buySilk) return false;
   return scen.gains.every(k=>["S","C","E","X"].includes(k));
 }
 function exactStats(scen, target){
@@ -1761,6 +1798,7 @@ function boardFlags(){
     targetType:document.getElementById("gTargetType").value,
     split:document.getElementById("gSplit").value,
     allowEarlyShuffle:document.getElementById("gEarlyShuffle").checked,
+    buySilk:document.getElementById("gBuySilk").checked,
   };
 }
 function flagSuffix(f){
@@ -1773,14 +1811,15 @@ function flagSuffix(f){
   if(f.split==="34")t.push("3/4 only");
   if(f.split==="43")t.push("4/3 only");
   if(f.allowEarlyShuffle)t.push("early shuffles ok");
+  if(f.buySilk)t.push("silk fallback");
   return t.length? " ["+t.join(", ")+"]" : "";
 }
 function mkScen(id,label,gains,extra){
   const f=boardFlags();
   return Object.assign({id,label:label+flagSuffix(f),gains,
     alms:f.alms, amass:f.amass, bakerBoard:f.bakerBoard, tfair:f.tfair, targetType:f.targetType, split:f.split,
-    allowEarlyShuffle:f.allowEarlyShuffle,
-    cargoMode:"silver", blockadeMode:"silver", ducatTrash:"on", baubleMode:"silver", salvagerMode:"off",
+    allowEarlyShuffle:f.allowEarlyShuffle, buySilk:f.buySilk,
+    cargoMode:"silver", blockadeMode:"silver", ducatTrash:"on", baubleMode:"silver", salvagerMode:"off", bonfireN:"2",
     gearMode:"auto", cellarMode:"auto", wwMode:"auto", envoyMode:"auto",
     targetPotion:currentTarget().potion,
     havenMode:"auto", starMode:"auto", advisorMode:"auto"}, extra||{});
@@ -1833,10 +1872,10 @@ let sortKey=null, sortDir=0;
 
 function currentTarget(){
   const raw=(document.getElementById("target").value||"5").trim();
-  const m=raw.match(/^(\d+)\s*(p?)$/i);
-  const t=m? Math.min(12,Math.max(1,+m[1])) : 5;
+  const m=raw.match(/^(\d*)\s*(p?)$/i);
   const potion=!!(m&&m[2]);
-  return {t, potion, label:"$"+t+(potion?"P":"")};
+  const t=(m&&m[1]!=="")? Math.min(12,Math.max(potion?0:1,+m[1])) : (potion?0:5);
+  return {t, potion, label: (t===0&&potion)? "P" : "$"+t+(potion?"P":"")};
 }
 function pct(x){ return (100*x).toFixed(2)+"%"; }
 function renderRows(){
@@ -1962,6 +2001,11 @@ function updateRulesNote(t){
     "Wedding ($4 + 3 Debt, single-split modes only): gains a Gold; the Debt is paid from the next turn's coins before anything can be bought, and blocks Alms that turn. "+
     "Asceticism: treated as a $3 opening buy that trashes an Estate from hand. "+
     "The turn-3 deck can be stacked by hand in the watch section for debugging. "+
+    "Exploration ($4 project): +1 Coffers and +1 Villager at the end of any buy phase without a card gain (projects, events and Bonfire do not count as gains; Wedding's Gold does). "+
+    "Bonfire ($3 event): trashes 2 played Coppers by default (option: 1). "+
+    "On Potion targets Haven and Gear bank a Potion first on turns that miss anyway, and Blockade gains a Potion instead of Silver when the deck holds none for the next turn. "+
+    "Silk fallback (settings): a missed turn 3 with $4+ buys a Silk Merchant for its on-gain Coffer and Villager, shipped by Cargo Ship or topdecked by Bauble when available. "+
+    "A target of just P (cost 0P, like Transmute) requires only a played Potion. "+
     "An Estate that a Baron in hand needs is never trashed, buried, set aside, or discarded.";
 }
 updateRulesNote(5);
@@ -2028,8 +2072,8 @@ function runScenarios(scens, forceAppend){
   const cacheOn=document.getElementById("gCache").checked;
   const cacheKey=(scen)=>{
     const o={g:scen.gains.slice().sort(), t:ct.label,
-      f:[!!scen.alms,!!scen.amass,!!scen.bakerBoard,!!scen.tfair,scen.targetType,scen.split,!!scen.targetPotion,!!scen.allowEarlyShuffle],
-      m:[scen.havenMode,scen.starMode,scen.advisorMode,scen.crucibleMode,scen.cargoMode,scen.blockadeMode,scen.ducatTrash,scen.gearMode,scen.wwMode,scen.envoyMode,scen.baubleMode,scen.salvagerMode]};
+      f:[!!scen.alms,!!scen.amass,!!scen.bakerBoard,!!scen.tfair,scen.targetType,scen.split,!!scen.targetPotion,!!scen.allowEarlyShuffle,!!scen.buySilk],
+      m:[scen.havenMode,scen.starMode,scen.advisorMode,scen.crucibleMode,scen.cargoMode,scen.blockadeMode,scen.ducatTrash,scen.gearMode,scen.wwMode,scen.envoyMode,scen.baubleMode,scen.salvagerMode,scen.bonfireN]};
     return "domsim1:"+JSON.stringify(o);
   };
   const loadCache=(k)=>{ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(e){ return null; } };
@@ -2164,13 +2208,15 @@ function refillAllSelects(){
 refillAllSelects();
 function overridesFor(gains){
   const o={};
-  const map={H:["havenMode","custHaven"],ST:["starMode","custStar"],AD:["advisorMode","custAdvisor"],CR:["crucibleMode","custCrucible"],CS:["cargoMode","custCargo"],BL:["blockadeMode","custBlockade"],DU:["ducatTrash","custDucat"],GE:["gearMode","custGear"],WW:["wwMode","custWW"],EN:["envoyMode","custEnvoy"],BA:["baubleMode","custBauble"],SV:["salvagerMode","custSalvager"]};
+  const map={H:["havenMode","custHaven"],ST:["starMode","custStar"],AD:["advisorMode","custAdvisor"],CR:["crucibleMode","custCrucible"],CS:["cargoMode","custCargo"],BL:["blockadeMode","custBlockade"],DU:["ducatTrash","custDucat"],GE:["gearMode","custGear"],WW:["wwMode","custWW"],EN:["envoyMode","custEnvoy"],BA:["baubleMode","custBauble"],SV:["salvagerMode","custSalvager"],BF:["bonfireN","custBonfire"]};
   for(const k in map) if(gains.includes(k)) o[map[k][0]]=document.getElementById(map[k][1]).value;
   return o;
 }
 function updateHavenVis(){
-  const v1=document.getElementById("cust1").value, v2=document.getElementById("cust2").value,
-        vp=document.getElementById("gPair").checked ? document.getElementById("pairCard").value : "";
+  const pairOn=document.getElementById("gPair").checked;
+  const v1=pairOn?"":document.getElementById("cust1").value,
+        v2=pairOn?"":document.getElementById("cust2").value,
+        vp=pairOn?document.getElementById("pairCard").value:"";
   document.getElementById("havenOptWrap").style.display = (v1==="H"||v2==="H"||vp==="H") ? "" : "none";
   document.getElementById("starOptWrap").style.display = (v1==="ST"||v2==="ST"||vp==="ST") ? "" : "none";
   document.getElementById("advOptWrap").style.display = (v1==="AD"||v2==="AD"||vp==="AD") ? "" : "none";
@@ -2183,6 +2229,7 @@ function updateHavenVis(){
   document.getElementById("envoyOptWrap").style.display = (v1==="EN"||v2==="EN"||vp==="EN") ? "" : "none";
   document.getElementById("baubleOptWrap").style.display = (v1==="BA"||v2==="BA"||vp==="BA") ? "" : "none";
   document.getElementById("salvOptWrap").style.display = (v1==="SV"||v2==="SV"||vp==="SV") ? "" : "none";
+  document.getElementById("bonfOptWrap").style.display = (v1==="BF"||v2==="BF"||vp==="BF") ? "" : "none";
 }
 document.getElementById("cust1").value="S";
 document.getElementById("cust2").value="S";
@@ -2190,6 +2237,7 @@ document.getElementById("pairCard").value="H";
 updateHavenVis();
 document.getElementById("cust1").addEventListener("change",updateHavenVis);
 document.getElementById("cust2").addEventListener("change",updateHavenVis);
+document.getElementById("pairCard").addEventListener("change",updateHavenVis);
 document.getElementById("custSame").addEventListener("click",updateHavenVis);
 document.getElementById("coggle").addEventListener("click",()=>{
   const r=document.getElementById("cogrow");
@@ -2205,15 +2253,15 @@ document.getElementById("gPair").addEventListener("change",e=>{
   document.getElementById("pairBox").classList.toggle("on", e.target.checked);
   document.getElementById("customBox").classList.toggle("on", !e.target.checked); // custom is on whenever pair mode is off
   document.getElementById("runAllPairs").style.display = e.target.checked ? "none" : "";
-  updateHavenVis();
   if(e.target.checked){
     const c1=document.getElementById("cust1").value;
     const sel=document.getElementById("pairCard");
     if(c1!=="-" && [...sel.options].some(o=>o.value===c1)) sel.value=c1;
   }
+  updateHavenVis();
   refreshWatchScenarios();
 });
-for(const id of ["cust1","cust2","custHaven","custStar","custAdvisor","custCrucible","custCargo","custBlockade","custDucat","custGear","custWW","custEnvoy","custBauble","custSalvager","pairCard","gPairLegal","gAlms","gAmass","gBaker","gTFair","gTargetType","gEarlyShuffle"]){
+for(const id of ["cust1","cust2","custHaven","custStar","custAdvisor","custCrucible","custCargo","custBlockade","custDucat","custGear","custWW","custEnvoy","custBauble","custSalvager","custBonfire","pairCard","gPairLegal","gAlms","gAmass","gBaker","gTFair","gTargetType","gEarlyShuffle","gBuySilk"]){
   document.getElementById(id).addEventListener("change",refreshWatchScenarios);
 }
 for(const id of ["gSplit","gFishAlways","gSort"]){
