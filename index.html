@@ -194,6 +194,19 @@ input[type=range]{accent-color:var(--gold)}
         <label id="baubleOptWrap" title="Bauble's topdeck option on a missed turn">Bauble:
           <select id="custBauble"><option value="silver">buy + topdeck a Silver on a miss</option><option value="off">never buy the Silver</option></select>
         </label>
+        <label id="saveOptWrap" title="What the Save event sets aside on a missed turn">Save:
+          <select id="custSave"><option value="auto">auto (pretest 10k each)</option><option value="treasure">bank treasure</option><option value="best">bank the best card</option></select>
+        </label>
+        <label id="hideoutOptWrap" title="What Hideout trashes (trashing the Estate gains a Curse)">Hideout:
+          <select id="custHideout"><option value="estate">trash the Estate (gains a Curse)</option><option value="copper">trash a Copper instead</option></select>
+        </label>
+        <label id="tentOptWrap" title="Whether Tent puts itself onto the deck when discarded from play">Tent:
+          <select id="custTent"><option value="auto">auto (pretest 10k each)</option><option value="top">always topdeck</option><option value="discard">never topdeck</option></select>
+        </label>
+        <label id="msgOptWrap" title="Which card Messenger's on-gain grabs (cost up to $4), and whether playing it flushes the deck into the discard">Messenger: gains
+          <select id="custMessenger"></select>
+          <select id="custMsgFlush"><option value="auto">flush: auto (pretest)</option><option value="keep">keep the deck</option><option value="flush">flush the deck</option></select>
+        </label>
         <label id="bonfOptWrap" title="How many played Coppers Bonfire trashes">Bonfire:
           <select id="custBonfire"><option value="2">trash 2 Coppers</option><option value="1">trash only 1 Copper</option></select>
         </label>
@@ -221,6 +234,7 @@ input[type=range]{accent-color:var(--gold)}
       <label title="Amass ($2 Event): if you have no Action cards in play, gain an Action card costing up to $5."><input type="checkbox" id="gAmass"> Amass</label>
       <label title="Baker's setup gives each player +1 Coffers at game start, even if nobody buys a Baker. Never stacks above 1."><input type="checkbox" id="gBaker"> Baker on the board (+1 Coffers)</label>
       <label title="Travelling Fair ($2 Event, +2 Buys; gained cards this turn may be topdecked). On turn 2 with $2 to spare, the gained card is put onto the deck so turn 3 draws it."><input type="checkbox" id="gTFair"> Travelling Fair</label>
+      <label title="Save ($1 Event, once per turn): on a missed turn 3 with $1+, sets aside a card to join the next hand."><input type="checkbox" id="gSave"> Save</label>
     </div>
     <div class="grouprow" id="cogrow" style="display:none">
       <span class="tag">&#9881; Settings</span>
@@ -374,6 +388,15 @@ const CARDS = {
   CO:{name:"Courier",       cost:4, coin:0, cls:"A", action:true, plusA:0},
   DG:{name:"Dungeon",       cost:3, coin:0, cls:"D", action:true, plusA:1, duration:true},
   SV:{name:"Salvager",      cost:4, coin:0, cls:"A", action:true, plusA:0},
+  HI:{name:"Hideout",       cost:4, coin:0, cls:"A", action:true, plusA:2},
+  VI:{name:"Village",       cost:3, coin:0, cls:"A", action:true, plusA:2},
+  QU:{name:"Quarry",        cost:4, coin:1, cls:"H", treasure:true},
+  SM:{name:"Spice Merchant",cost:4, coin:0, cls:"A", action:true, plusA:0},
+  LK:{name:"Lackeys",       cost:2, coin:0, cls:"A", action:true, plusA:0},
+  FH:{name:"Fortune Hunter",cost:4, coin:0, cls:"A", action:true, plusA:0},
+  NJ:{name:"Ninja",         cost:4, coin:0, cls:"A", action:true, plusA:0, shadow:true},
+  TE:{name:"Tent",          cost:3, coin:0, cls:"A", action:true, plusA:0},
+  ME:{name:"Messenger",     cost:4, coin:0, cls:"A", action:true, plusA:0},
   XP:{name:"Exploration",   cost:4, coin:0, cls:"PR", project:true},
   BF:{name:"Bonfire",       cost:3, coin:0, cls:"PR", event:true},
   WE:{name:"Wedding",       cost:4, coin:0, cls:"PR", event:true},
@@ -384,7 +407,7 @@ const CARDS = {
   SN:{name:"Sinister Plot", cost:4, coin:0, cls:"PR", project:true},
 };
 const BAD_CARDS=["C","E","X"];
-const OPEN_CARDS = ["V","R","T","D","MO","SU","FI","FG","DU","CD","CE","BA","H","L","W","G","K","Z","CH","SK","CM","CS","SR","GE","EX","WW","DG","AS","BF","PG","ST","B","M","P","A","I","Y","N","O","U","J","AD","IM","MG","PT","BH","CR","GO","PC","AL","KS","EN","CO","SV","BL","XP","SL","SN","F","FM","WE"];
+const OPEN_CARDS = ["V","R","T","D","MO","SU","FI","FG","DU","CD","CE","BA","LK","H","L","W","G","K","Z","CH","SK","CM","CS","SR","GE","EX","WW","DG","AS","BF","TE","VI","PG","ST","B","M","P","A","I","Y","N","O","U","J","AD","HI","IM","MG","PT","BH","CR","GO","PC","AL","KS","EN","CO","SV","BL","XP","NJ","ME","QU","SM","FH","SL","SN","F","FM","WE"];
 const PICKABLE   = ["S"].concat(OPEN_CARDS);
 
 /* ================= engine =================
@@ -485,6 +508,11 @@ function costNow(g,k){
   if(k==="FM") return g.discard.length===0 ? 2 : 5;
   return CARDS[k].cost;
 }
+function keepValue1(k){
+  if(k==="S") return 3; if(k==="GD") return 4; if(k==="PO") return 2.6;
+  if(CARDS[k].action) return 2; if(k==="C"||k==="Q") return 1.5;
+  return 0.2;
+}
 function keepValues(g){
   const hasB=g.hand.includes("B");
   let boosted=false;
@@ -519,7 +547,7 @@ function discardWorstN(g,n,who,emit){
 function playActions(g, target, emit){
   let actions=1;
   const lastTurn = g.turn>=4;
-  for(const k of ["W","U","HO","EX","DG","AL","T","V","D","Z","AD","IM","MG","PT","PC","FM","WW","CD","CE","A","G","O","F","L","R","P","K","CH","H","BH","N","M","B","EN","Y","GE","SV","CO","J","MO","SR","CS","BL","FI","KS","CM"]){
+  for(const k of ["W","U","HO","EX","DG","AL","T","V","D","VI","Z","HI","SM","AD","IM","MG","PT","PC","FM","WW","CD","CE","A","G","O","F","L","R","P","K","CH","H","BH","N","M","B","EN","Y","GE","SV","CO","J","MO","LK","NJ","FH","SR","CS","TE","ME","BL","FI","KS","CM"]){
     while(g.hand.includes(k) || (CARDS[k].shadow && g.deck.includes(k))){
       const fromDeck = CARDS[k].shadow && !g.hand.includes(k);
       if(actions<=0){
@@ -646,6 +674,53 @@ function playActions(g, target, emit){
             if(emit) emit("Lookout: put "+CARDS[looked[0]].name+" back on top");
           }
         } else if(emit) emit("Lookout: nothing to look at");
+      }
+
+      if(k==="HI"){ // Hideout: +1 Card, +2 Actions; trash a card (Victory -> gain a Curse)
+        removeOne(g.hand,"HI"); g.inPlay.push("HI");
+        if(emit) emit("play Hideout (+1 card, +2 actions)");
+        draw(g,1,emit);
+        if(g.hand.length>0){
+          let tr=null;
+          const cSafe = !(turnCoins(g)>=target && turnCoins(g)-1<target); // never break a standing hit for a Copper trash
+          if(g.hand.includes("X")) tr="X";
+          else if(g.hideoutMode==="copper"){
+            if(g.hand.includes("C") && cSafe) tr="C";
+            else if(spareEstate(g)) tr="E";
+            else if(g.hand.includes("C")) tr="C";
+          } else {
+            if(spareEstate(g)) tr="E";
+            else if(g.hand.includes("C") && cSafe) tr="C";
+          }
+          if(!tr) tr=pickWorst(g.hand);
+          removeOne(g.hand,tr); g.trash.push(tr);
+          if(emit) emit("Hideout: trash "+CARDS[tr].name);
+          if(tr==="E" || CARDS[tr].victory){
+            g.discard.push("X");
+            if(emit) emit("Hideout: trashed a Victory card -> gain a Curse to the discard pile");
+          }
+        } else if(emit) emit("Hideout: hand empty, nothing to trash");
+      }
+
+      if(k==="VI"){ // Village: +1 Card, +2 Actions
+        removeOne(g.hand,"VI"); g.inPlay.push("VI");
+        if(emit) emit("play Village (+1 card, +2 actions)");
+        draw(g,1,emit);
+      }
+
+      if(k==="SM"){ // Spice Merchant: may trash a Copper -> draw 2 +1 action, or +1 buy +$2
+        if(!g.hand.includes("C")){ if(emit) emit("Spice Merchant stays in hand (no Copper worth trashing)"); break; }
+        removeOne(g.hand,"SM"); g.inPlay.push("SM");
+        const c0=turnCoins(g);
+        if(c0+1>=target){ // trashing the Copper (-1) then +$2 secures the target
+          removeOne(g.hand,"C"); g.trash.push("C"); g.bonus+=2;
+          if(emit) emit("play Spice Merchant: trash a Copper -> +1 buy, +$2 (secures the target)");
+        } else {
+          removeOne(g.hand,"C"); g.trash.push("C");
+          if(emit) emit("play Spice Merchant: trash a Copper -> +2 cards, +1 action");
+          draw(g,2,emit);
+          actions++;
+        }
       }
 
       if(k==="AD"){ // Advisor: +1 Action; reveal 3, opponent discards one, rest to hand
@@ -1161,6 +1236,65 @@ function playActions(g, target, emit){
         break;
       }
 
+      if(k==="LK"){ // Lackeys (terminal): +2 Cards (its Villagers came on gain)
+        removeOne(g.hand,"LK"); g.inPlay.push("LK");
+        if(emit) emit("play Lackeys (+2 cards)");
+        draw(g,2,emit);
+      }
+
+      if(k==="FH"){ // Fortune Hunter (terminal): +$2; look at top 3, may play a treasure, rest back
+        removeOne(g.hand,"FH"); g.inPlay.push("FH"); g.bonus+=2;
+        if(emit) emit("play Fortune Hunter (+$2, look at top 3)");
+        const looked=[];
+        for(let i=0;i<3;i++){
+          if(g.deck.length===0){
+            if(g.discard.length===0) break;
+            if(emit) emit("shuffle discard into deck (to look)"); shuffleInto(g, emit);
+          }
+          looked.push(g.deck.pop());
+        }
+        if(looked.length>0){
+          if(emit){ g.revealed.push(...looked); emit("Fortune Hunter sees: "+looked.map(x=>CARDS[x].name).join(", ")); g.revealed.length=0; }
+          let pl=null;
+          if(g.needPotion && !g.hand.includes("PO") && looked.includes("PO")) pl="PO";
+          if(!pl) for(const w of ["GD","S","FG","C","Q"]) if(looked.includes(w)){ pl=w; break; }
+          if(pl){
+            removeOne(looked,pl);
+            if(pl==="PO"){ g.hand.push("PO"); if(emit) emit("Fortune Hunter: play the Potion"); }
+            else {
+              g.inPlay.push(pl);
+              const v = pl==="FG" ? (countOf(g.hand,"FG")>0?4:1) : CARDS[pl].coin;
+              g.bonus+=v;
+              if(emit) emit("Fortune Hunter: play "+CARDS[pl].name+" -> +$"+v);
+            }
+          } else if(emit) emit("Fortune Hunter: no treasure to play");
+          looked.sort((a,b)=>keepValue1(a)-keepValue1(b));
+          for(const k2 of looked) g.deck.push(k2); // best last = on top for the next draws
+          if(looked.length && emit) emit("put the rest back, best on top");
+        }
+      }
+
+      if(k==="NJ"){ // Ninja (Shadow, terminal): +1 Card (opponent discard ignored)
+        if(!removeOne(g.hand,"NJ")) removeOne(g.deck,"NJ");
+        g.inPlay.push("NJ");
+        if(emit) emit("play Ninja (+1 card)"+(fromDeck?" — played from the deck (Shadow)":""));
+        draw(g,1,emit);
+      }
+
+      if(k==="TE"){ // Tent (terminal): +$2; may topdeck itself from play at clean-up
+        removeOne(g.hand,"TE"); g.inPlay.push("TE"); g.bonus+=2;
+        if(emit) emit("play Tent (+$2)");
+      }
+
+      if(k==="ME"){ // Messenger (terminal): +1 Buy, +$2; may flush the deck
+        removeOne(g.hand,"ME"); g.inPlay.push("ME"); g.bonus+=2;
+        if(emit) emit("play Messenger (+1 buy, +$2)");
+        if(g.messengerFlush==="flush" && g.deck.length>0){
+          if(emit) emit("Messenger: put the deck ("+g.deck.length+" cards) into the discard pile");
+          g.discard.push(...g.deck); g.deck=[];
+        }
+      }
+
       if(k==="FI"){ // Fishmonger (Shadow, terminal): +1 Buy, +$1
         if(!removeOne(g.hand,"FI")) removeOne(g.deck,"FI");
         g.inPlay.push("FI"); g.bonus+=1;
@@ -1198,7 +1332,11 @@ function tiaraBuy(g, emit){
   if(emit) emit("Tiara: put the gained "+CARDS[gain].name+" on top of the deck");
 }
 
-function cleanup(g){
+function cleanup(g, emit){
+  while(g.tentMode!=="discard" && g.inPlay.includes("TE")){
+    removeOne(g.inPlay,"TE"); g.deck.push("TE");
+    if(emit) emit("Tent: put it onto the deck instead of discarding (drawn next turn)");
+  }
   g.discard.push(...g.hand, ...g.inPlay);
   g.hand=[]; g.inPlay=[];
 }
@@ -1257,6 +1395,13 @@ function acquiredCount(gains,flags,startCoffers){
   const ms = (flags&&flags.split==="34") ? [3,4] : [4,3];
   const picks=planBuys(ms[0],ms[1],gains,flags,startCoffers||0);
   return (picks[0].pick?1:0)+(picks[1].pick?1:0);
+}
+function onGainFx(g, card, emit){
+  if(card==="J"){ g.coffers++; g.villagers++; if(emit) emit("Silk Merchant on-gain: +1 Coffers, +1 Villager (now "+g.coffers+" / "+g.villagers+")"); }
+  if(card==="KS"){ g.discard.push("GD"); if(emit) emit("Skulk on-gain: gain a Gold to the discard pile"); }
+  if(card==="EX"){ g.discard.push("EX"); if(emit) emit("Experiment on-gain: gain a second Experiment"); }
+  if(card==="DU" && g.ducatTrashFlag!==false && removeOne(g.hand,"C")){ g.trash.push("C"); if(emit) emit("Ducat on-gain: trash a Copper from hand"); }
+  if(card==="LK"){ g.villagers+=2; if(emit) emit("Lackeys on-gain: +2 Villagers (now "+g.villagers+")"); }
 }
 function execBuy(g, entry, hadGains, emit, tfair){
   const pick=entry&&entry.pick;
@@ -1331,6 +1476,15 @@ function execBuy(g, entry, hadGains, emit, tfair){
     }
     if(pick.card==="DU" && g.ducatTrashFlag!==false){
       if(removeOne(g.hand,"C")){ g.trash.push("C"); if(emit) emit("Ducat on-gain: trash a Copper from hand"); }
+    }
+    if(pick.card==="LK"){
+      g.villagers+=2;
+      if(emit) emit("Lackeys on-gain: +2 Villagers (now "+g.villagers+")");
+    }
+    if(pick.card==="ME" && g.msgGain && CARDS[g.msgGain]){
+      g.discard.push(g.msgGain);
+      if(emit) emit("Messenger on-gain (first gain this buy phase): also gain "+CARDS[g.msgGain].name+" ($"+CARDS[g.msgGain].cost+") to the discard pile");
+      onGainFx(g, g.msgGain, emit);
     }
   }
   return spentMoney;
@@ -1460,6 +1614,14 @@ function playGame(scen, target, rec){
   g.salvagerMode = scen.salvagerMode==="on" ? "on" : "off";
   g.stackT3 = scen.stackT3||null;
   g.bonfireN = scen.bonfireN==="1"||scen.bonfireN===1 ? 1 : 2;
+  g.tentMode = scen.tentMode==="discard" ? "discard" : "top";
+  g.hideoutMode = scen.hideoutMode==="copper" ? "copper" : "estate";
+  g.saveMode = scen.saveMode==="best" ? "best" : "treasure";
+  g.messengerFlush = scen.messengerFlush==="flush" ? "flush" : "keep";
+  {
+    const mg=scen.messengerGain;
+    g.msgGain = (mg && mg!=="-" && mg!=="all" && CARDS[mg] && !CARDS[mg].project && !CARDS[mg].event && CARDS[mg].cost<=4) ? mg : null;
+  }
   // scen.crucibleMode is read directly in playTreasurePhase
   g.needPotion = !!scen.targetPotion;
   g.coffers = (scen.gains.includes("F")||scen.bakerBoard) ? 1 : 0; // Baker setup: never stacks above 1
@@ -1548,7 +1710,7 @@ function playGame(scen, target, rec){
           if(emit) emit("Exploration: no card gained this buy phase -> +1 Coffers, +1 Villager (now "+g.coffers+" / "+g.villagers+")");
         }
       }
-      cleanup(g);
+      cleanup(g, emit);
       if(emit) emit("clean-up");
     } else {
       // Amass line: with an Action-type target costing <=$5, a turn with no action
@@ -1563,19 +1725,22 @@ function playGame(scen, target, rec){
       } else {
         g.gainedTarget=false;
         playActions(g, target, emit);
-        playTreasurePhase(g, target, scen, turn>=4, emit);
+        const nQU=countOf(g.hand,"QU");
+        const effT = ((scen.targetType||"action")==="action" && nQU>0) ? Math.max(0, target-2*nQU) : target;
+        if(effT<target && emit) emit("Quarry: the action target costs $"+effT+" this turn");
+        playTreasurePhase(g, effT, scen, turn>=4, emit);
         if(g.debt>0){
           const pay=Math.min(turnCoins(g), g.debt);
           if(pay>0){ g.debt-=pay; g.bonus-=pay; if(emit) emit("pay $"+pay+" toward Debt ("+g.debt+" remaining)"); }
         }
         c=turnCoins(g);
         const potionOk = !scen.targetPotion || g.hand.includes("PO");
-        if(c<target && c+g.coffers>=target && potionOk){
-          const k=target-c;
+        if(c<effT && c+g.coffers>=effT && potionOk){
+          const k=effT-c;
           g.coffers-=k; g.bonus+=k; c=turnCoins(g);
           if(emit) emit("spend "+k+" Coffers for +$"+k+" ("+(g.coffers)+" left)");
         }
-        hit = (c>=target && potionOk) || g.gainedTarget;
+        hit = (c>=effT && potionOk) || g.gainedTarget;
         if(emit){
           const tl="$"+target+(scen.targetPotion?"P":"");
           if(g.gainedTarget) emit("Turn "+turn+" money: $"+c+" — target gained via Craftsman  hit ("+tl+")","hit");
@@ -1584,6 +1749,17 @@ function playGame(scen, target, rec){
           else emit("Turn "+turn+" money: $"+c+(scen.targetPotion&&potionOk?" + Potion":"")+"  miss (under "+tl+")","miss");
         }
         if(turn===3) tiaraBuy(g, emit);
+      }
+      // Save: on a miss, $1 banks a card into the next hand (its +1 Buy funds the other purchases)
+      let saveSpent=0;
+      if(scen.saveEvent && turn<4 && !hit && !g.gainedTarget && g.debt===0 && c>=1 && g.hand.length>0){
+        let sv=null;
+        if(g.saveMode==="best") sv = g.hand.find(x=>CARDS[x].action && !CARDS[x].shadow) || treasureIn(g, g.needPotion?["PO","S","C","Q"]:TREAS_DESC);
+        else sv = treasureIn(g, g.needPotion?["PO","S","C","Q"]:TREAS_DESC);
+        if(sv){
+          removeOne(g.hand,sv); g.setAside.push(sv); saveSpent=1;
+          if(emit) emit("miss: buy Save ($1, +1 buy) — set aside "+CARDS[sv].name+", it joins the next hand");
+        }
       }
       // Cargo Ship / Bauble: on a miss, buy a Silver for next turn (one extra buy total)
       let cargoSpent=0;
@@ -1612,7 +1788,7 @@ function playGame(scen, target, rec){
       }
       g.cargoAvail=0;
       if(g.projects.includes("PG")){
-        const leftover = (amassLive ? c-2 : ((hit && !g.gainedTarget) ? c-target : c)) - cargoSpent;
+        const leftover = (amassLive ? c-2 : ((hit && !g.gainedTarget) ? c-target : c)) - cargoSpent - saveSpent;
         if(leftover>=1){
           g.coffers++;
           if(emit) emit("Pageant: pay $1 of the leftover $"+leftover+" for +1 Coffers (now "+g.coffers+")");
@@ -1623,7 +1799,7 @@ function playGame(scen, target, rec){
         if(emit) emit("Exploration: no card gained this buy phase -> +1 Coffers, +1 Villager (now "+g.coffers+" / "+g.villagers+")");
       }
       if(turn===3){ g.t3=c; g.hit3=hit; } else { g.t4=c; g.hit4=hit; }
-      cleanup(g);
+      cleanup(g, emit);
       if(emit) emit("clean-up");
     }
   }
@@ -1666,6 +1842,18 @@ function pretestDims(scen){
     dims.push({key:"envoyMode", minimize:true, auto:(scen.envoyMode||"auto")==="auto", val:scen.envoyMode,
       vals:["card","treasure"], name:{card:"envoy: opponent denies the action",treasure:"envoy: opponent denies treasure"}});
   }
+  if(scen.saveEvent){
+    dims.push({key:"saveMode", auto:(scen.saveMode||"auto")==="auto", val:scen.saveMode,
+      vals:["treasure","best"], name:{treasure:"save: bank treasure",best:"save: bank the best card"}});
+  }
+  if(scen.gains.includes("TE")){
+    dims.push({key:"tentMode", auto:(scen.tentMode||"auto")==="auto", val:scen.tentMode,
+      vals:["top","discard"], name:{top:"tent: topdeck from play",discard:"tent: never topdeck"}});
+  }
+  if(scen.gains.includes("ME")){
+    dims.push({key:"messengerFlush", auto:(scen.messengerFlush||"auto")==="auto", val:scen.messengerFlush,
+      vals:["keep","flush"], name:{keep:"messenger: keep the deck",flush:"messenger: flush the deck"}});
+  }
   if(scen.gains.includes("AD") && scen.gains.some(k=>k!=="AD"&&CARDS[k]&&CARDS[k].action)){
     dims.push({key:"advisorMode", minimize:true, auto:(scen.advisorMode||"auto")==="auto", val:scen.advisorMode,
       vals:["card","treasure"], name:{card:"advisor: opponent denies the action",treasure:"advisor: opponent denies treasure"}});
@@ -1689,6 +1877,7 @@ function resolveScenario(scen, target, pretestN){
     {card:"DU",key:"ducatTrash",def:"on",name:{off:"ducat: keeps the Copper"}},
     {card:"BA",key:"baubleMode",def:"silver",name:{off:"bauble: no Silver topdeck"}},
     {card:"BF",key:"bonfireN",def:"2",name:{"1":"bonfire: trash only 1 Copper"}},
+    {card:"HI",key:"hideoutMode",def:"estate",name:{copper:"hideout: trash Copper instead"}},
   ];
   const extras=[];
   const AB_KEYS={envoyMode:1,advisorMode:1,havenMode:1,starMode:1,gearMode:1,wwMode:1};
@@ -1698,6 +1887,10 @@ function resolveScenario(scen, target, pretestN){
     const v=scen[m.key];
     if(v && v!=="auto" && v!==m.def && m.name[v]) extras.push(m.name[v]);
     else if(AB_KEYS[m.key] && m.name[m.def]) extras.push(m.name[m.def]); // A/B cards always state the behavior in effect
+  }
+  if(scen.gains.includes("ME")){
+    const mg=scen.messengerGain;
+    extras.push(mg && CARDS[mg] ? "messenger gains "+CARDS[mg].name : "messenger gains nothing");
   }
   const extraNote = extras.length ? " ["+extras.join(", ")+"]" : "";
   if(dims.length===0) return {scen, note:extraNote};
@@ -1732,7 +1925,7 @@ function resolveScenario(scen, target, pretestN){
 /* Exact combinatorics for decision-free openings (only plain S/C/E/X gains,
    no events, no potion): enumerate the multivariate hypergeometric T3xT4 deal. */
 function exactEligible(scen){
-  if(scen.alms||scen.amass||scen.tfair||scen.bakerBoard||scen.targetPotion||scen.buySilk) return false;
+  if(scen.alms||scen.amass||scen.tfair||scen.bakerBoard||scen.targetPotion||scen.buySilk||scen.saveEvent) return false;
   return scen.gains.every(k=>["S","C","E","X"].includes(k));
 }
 function exactStats(scen, target){
@@ -1799,6 +1992,7 @@ function boardFlags(){
     split:document.getElementById("gSplit").value,
     allowEarlyShuffle:document.getElementById("gEarlyShuffle").checked,
     buySilk:document.getElementById("gBuySilk").checked,
+    saveEvent:document.getElementById("gSave").checked,
   };
 }
 function flagSuffix(f){
@@ -1819,7 +2013,8 @@ function mkScen(id,label,gains,extra){
   return Object.assign({id,label:label+flagSuffix(f),gains,
     alms:f.alms, amass:f.amass, bakerBoard:f.bakerBoard, tfair:f.tfair, targetType:f.targetType, split:f.split,
     allowEarlyShuffle:f.allowEarlyShuffle, buySilk:f.buySilk,
-    cargoMode:"silver", blockadeMode:"silver", ducatTrash:"on", baubleMode:"silver", salvagerMode:"off", bonfireN:"2",
+    saveEvent:f.saveEvent, saveMode:document.getElementById("custSave").value,
+    cargoMode:"silver", blockadeMode:"silver", ducatTrash:"on", baubleMode:"silver", salvagerMode:"off", bonfireN:"2", hideoutMode:"estate",
     gearMode:"auto", cellarMode:"auto", wwMode:"auto", envoyMode:"auto",
     targetPotion:currentTarget().potion,
     havenMode:"auto", starMode:"auto", advisorMode:"auto"}, extra||{});
@@ -1845,6 +2040,11 @@ function buildScenarios(){
     const b=document.getElementById("cust2").value;
     const gains=[]; if(a!=="-")gains.push(a); if(b!=="-")gains.push(b);
     const nm=gains.length? gains.map(k=>CARDS[k].name).join(" + ") : "Nothing";
+    if(gains.includes("ME") && document.getElementById("custMessenger").value==="all"){
+      const base=overridesFor(gains);
+      return [null].concat(messengerCompanions()).map(cd=>
+        mkScen("custom_me_"+(cd||"none"), nm, gains, Object.assign({},base,{messengerGain:cd})));
+    }
     return [mkScen("custom",nm,gains,overridesFor(gains))];
   }
   {
@@ -2006,6 +2206,15 @@ function updateRulesNote(t){
     "On Potion targets Haven and Gear bank a Potion first on turns that miss anyway, and Blockade gains a Potion instead of Silver when the deck holds none for the next turn. "+
     "Silk fallback (settings): a missed turn 3 with $4+ buys a Silk Merchant for its on-gain Coffer and Villager, shipped by Cargo Ship or topdecked by Bauble when available. "+
     "A target of just P (cost 0P, like Transmute) requires only a played Potion. "+
+    "Ninja: Shadow terminal +1 card, played after every bigger draw terminal (attack ignored). "+
+    "Tent: terminal +$2; topdecking itself from play at clean-up is A/B pretested. "+
+    "Messenger: terminal +1 buy +$2; its on-gain grabs a chosen card up to $4 (with on-gain chains like Silk or Skulk applying), and whether playing it flushes the deck into the discard is A/B pretested. Excluded from the bulk pair runs; the 'all' companion option runs one row per gainable card. "+
+    "Hideout: village-cantrip that trashes an Estate by default (gaining the Curse, as the card demands) or a Copper via the override; it never trashes a Copper that would break a standing hit, and always trashes a Curse first when one is in hand. "+
+    "Save ($1 event, board toggle): a missed turn 3 banks a card into the next hand — treasure vs best card is A/B pretested. "+
+    "Village: +1 card +2 actions. Lackeys: terminal +2 cards with +2 Villagers on gain. "+
+    "Quarry: +$1 and, when the target is an Action, reduces its cost by $2 per Quarry played that turn. "+
+    "Spice Merchant: trashes a Copper to draw 2 (+1 action), or takes +$2 instead when that secures the target; never plays without a Copper. "+
+    "Fortune Hunter: +$2, looks at 3, plays the best plain treasure (a needed Potion first), puts the rest back best-on-top. "+
     "An Estate that a Baron in hand needs is never trashed, buried, set aside, or discarded.";
 }
 updateRulesNote(5);
@@ -2071,10 +2280,21 @@ function runScenarios(scens, forceAppend){
   };
   const cacheOn=document.getElementById("gCache").checked;
   const cacheKey=(scen)=>{
-    const o={g:scen.gains.slice().sort(), t:ct.label,
-      f:[!!scen.alms,!!scen.amass,!!scen.bakerBoard,!!scen.tfair,scen.targetType,scen.split,!!scen.targetPotion,!!scen.allowEarlyShuffle,!!scen.buySilk],
-      m:[scen.havenMode,scen.starMode,scen.advisorMode,scen.crucibleMode,scen.cargoMode,scen.blockadeMode,scen.ducatTrash,scen.gearMode,scen.wwMode,scen.envoyMode,scen.baubleMode,scen.salvagerMode,scen.bonfireN]};
-    return "domsim1:"+JSON.stringify(o);
+    // named keys with defaults omitted: adding future options never invalidates old entries
+    const DEFS={alms:false,amass:false,bakerBoard:false,tfair:false,targetPotion:false,allowEarlyShuffle:false,buySilk:false,saveEvent:false,
+      targetType:"action",split:"both",
+      havenMode:"auto",starMode:"auto",advisorMode:"auto",gearMode:"auto",wwMode:"auto",envoyMode:"auto",tentMode:"auto",messengerFlush:"auto",saveMode:"auto",
+      crucibleMode:"off",cargoMode:"silver",blockadeMode:"silver",ducatTrash:"on",baubleMode:"silver",salvagerMode:"off",bonfireN:"2",hideoutMode:"estate",messengerGain:""};
+    const o={g:scen.gains.slice().sort(), t:ct.label};
+    for(const k of Object.keys(DEFS).sort()){
+      let v=scen[k];
+      if(v===undefined||v===null) v=DEFS[k];
+      if(typeof DEFS[k]==="boolean") v=!!v;
+      else v=String(v);
+      if(k==="messengerGain"&&(v==="-"||v==="all")) v="";
+      if(v!==DEFS[k]) o[k]=v;
+    }
+    return "domsim2:"+JSON.stringify(o);
   };
   const loadCache=(k)=>{ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(e){ return null; } };
   const saveCache=(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} };
@@ -2105,11 +2325,13 @@ function runScenarios(scens, forceAppend){
   };
   // resolve fully-cached scenarios immediately
   const pending=[];
+  let fromCacheN=0;
   plans.forEach((pl,idx)=>{
-    if(pl.runN===0){ finishIdx(idx, fromCounts(pl.cached)); }
+    if(pl.runN===0){ fromCacheN++; finishIdx(idx, fromCounts(pl.cached)); }
     else pending.push(idx);
   });
-  if(pending.length===0) return;
+  if(fromCacheN>0) progress.textContent = fromCacheN+" of "+scens.length+" loaded from cache";
+  if(pending.length===0){ progress.textContent="done — all "+scens.length+" from cache"; return; }
   const runSyncRemaining=async ()=>{
     for(const i of pending){
       if(finished.has(i)) continue;
@@ -2164,13 +2386,13 @@ function runPairSet(pairs){
   runScenarios(scens, true); // table already cleared above if append is off
 }
 document.getElementById("runAllPairs").addEventListener("click", ()=>{
-  const cards=["-"].concat(pickableNow()); // Nothing counts as a card
+  const cards=["-"].concat(pickableNow().filter(c=>c!=="ME")); // Nothing counts as a card; Messenger needs its companion picked manually
   const pairs=[];
   for(let i=0;i<cards.length;i++) for(let j=i;j<cards.length;j++) pairs.push([cards[i],cards[j]]);
   runPairSet(pairs);
 });
 document.getElementById("runSelfPairs").addEventListener("click", ()=>{
-  runPairSet(pickableNow().map(c=>[c,c]));
+  runPairSet(pickableNow().filter(c=>c!=="ME").map(c=>[c,c]));
 });
 document.getElementById("runMatrix").addEventListener("click", ()=>{
   const a=document.getElementById("cust1").value, b=document.getElementById("cust2").value;
@@ -2183,7 +2405,7 @@ document.getElementById("gCpu").addEventListener("input", ()=>{
 document.getElementById("clearCache").addEventListener("click", ()=>{
   try{
     const del=[];
-    for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&k.startsWith("domsim1:")) del.push(k); }
+    for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&(k.startsWith("domsim1:")||k.startsWith("domsim2:"))) del.push(k); }
     for(const k of del) localStorage.removeItem(k);
     progress.textContent="cache cleared ("+del.length+" entries)";
   }catch(e){ progress.textContent="cache unavailable"; }
@@ -2200,16 +2422,31 @@ function fillCardSelect(sel, withNothing){
   }
   if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
 }
+function messengerCompanions(){
+  const seen=new Set();
+  return ["S"].concat(currentTarget().potion?["PO"]:[]).concat(openCardsNow())
+    .filter(k=>CARDS[k] && !CARDS[k].project && !CARDS[k].event && CARDS[k].cost<=4 && k!=="FM" && !seen.has(k) && seen.add(k));
+}
 function refillAllSelects(){
   fillCardSelect(document.getElementById("cust1"),true);
   fillCardSelect(document.getElementById("cust2"),true);
   fillCardSelect(document.getElementById("pairCard"),false);
+  const ms=document.getElementById("custMessenger");
+  const old=ms.value;
+  ms.innerHTML="";
+  for(const [v,t] of [["-","nothing"],["all","all (one row per card)"]]){
+    const o=document.createElement("option"); o.value=v; o.textContent=t; ms.appendChild(o);
+  }
+  for(const k of messengerCompanions()){
+    const o=document.createElement("option"); o.value=k; o.textContent=CARDS[k].name+" ($"+CARDS[k].cost+")"; ms.appendChild(o);
+  }
+  if([...ms.options].some(o=>o.value===old)) ms.value=old;
 }
 refillAllSelects();
 function overridesFor(gains){
   const o={};
-  const map={H:["havenMode","custHaven"],ST:["starMode","custStar"],AD:["advisorMode","custAdvisor"],CR:["crucibleMode","custCrucible"],CS:["cargoMode","custCargo"],BL:["blockadeMode","custBlockade"],DU:["ducatTrash","custDucat"],GE:["gearMode","custGear"],WW:["wwMode","custWW"],EN:["envoyMode","custEnvoy"],BA:["baubleMode","custBauble"],SV:["salvagerMode","custSalvager"],BF:["bonfireN","custBonfire"]};
-  for(const k in map) if(gains.includes(k)) o[map[k][0]]=document.getElementById(map[k][1]).value;
+  const map=[["H","havenMode","custHaven"],["ST","starMode","custStar"],["AD","advisorMode","custAdvisor"],["CR","crucibleMode","custCrucible"],["CS","cargoMode","custCargo"],["BL","blockadeMode","custBlockade"],["DU","ducatTrash","custDucat"],["GE","gearMode","custGear"],["WW","wwMode","custWW"],["EN","envoyMode","custEnvoy"],["BA","baubleMode","custBauble"],["SV","salvagerMode","custSalvager"],["BF","bonfireN","custBonfire"],["TE","tentMode","custTent"],["HI","hideoutMode","custHideout"],["ME","messengerFlush","custMsgFlush"],["ME","messengerGain","custMessenger"]];
+  for(const [c,k,id] of map) if(gains.includes(c)) o[k]=document.getElementById(id).value;
   return o;
 }
 function updateHavenVis(){
@@ -2230,6 +2467,10 @@ function updateHavenVis(){
   document.getElementById("baubleOptWrap").style.display = (v1==="BA"||v2==="BA"||vp==="BA") ? "" : "none";
   document.getElementById("salvOptWrap").style.display = (v1==="SV"||v2==="SV"||vp==="SV") ? "" : "none";
   document.getElementById("bonfOptWrap").style.display = (v1==="BF"||v2==="BF"||vp==="BF") ? "" : "none";
+  document.getElementById("tentOptWrap").style.display = (v1==="TE"||v2==="TE"||vp==="TE") ? "" : "none";
+  document.getElementById("hideoutOptWrap").style.display = (v1==="HI"||v2==="HI"||vp==="HI") ? "" : "none";
+  document.getElementById("saveOptWrap").style.display = document.getElementById("gSave").checked ? "" : "none";
+  document.getElementById("msgOptWrap").style.display = (v1==="ME"||v2==="ME"||vp==="ME") ? "" : "none";
 }
 document.getElementById("cust1").value="S";
 document.getElementById("cust2").value="S";
@@ -2238,6 +2479,7 @@ updateHavenVis();
 document.getElementById("cust1").addEventListener("change",updateHavenVis);
 document.getElementById("cust2").addEventListener("change",updateHavenVis);
 document.getElementById("pairCard").addEventListener("change",updateHavenVis);
+document.getElementById("gSave").addEventListener("change",updateHavenVis);
 document.getElementById("custSame").addEventListener("click",updateHavenVis);
 document.getElementById("coggle").addEventListener("click",()=>{
   const r=document.getElementById("cogrow");
@@ -2261,7 +2503,7 @@ document.getElementById("gPair").addEventListener("change",e=>{
   updateHavenVis();
   refreshWatchScenarios();
 });
-for(const id of ["cust1","cust2","custHaven","custStar","custAdvisor","custCrucible","custCargo","custBlockade","custDucat","custGear","custWW","custEnvoy","custBauble","custSalvager","custBonfire","pairCard","gPairLegal","gAlms","gAmass","gBaker","gTFair","gTargetType","gEarlyShuffle","gBuySilk"]){
+for(const id of ["cust1","cust2","custHaven","custStar","custAdvisor","custCrucible","custCargo","custBlockade","custDucat","custGear","custWW","custEnvoy","custBauble","custSalvager","custBonfire","custTent","custMessenger","custMsgFlush","custHideout","pairCard","gPairLegal","gAlms","gAmass","gBaker","gTFair","gTargetType","gEarlyShuffle","gBuySilk","gSave","custSave"]){
   document.getElementById(id).addEventListener("change",refreshWatchScenarios);
 }
 for(const id of ["gSplit","gFishAlways","gSort"]){
@@ -2314,6 +2556,7 @@ function rebuildStack(){
     if(k==="KS") list.push("GD");
     if(k==="EX") list.push("EX");
     if(k==="DU" && (scen.ducatTrash!=="off")){ const i=list.indexOf("C"); if(i>=0) list.splice(i,1); }
+    if(k==="ME" && scen.messengerGain && CARDS[scen.messengerGain]) list.push(scen.messengerGain);
   }
   if(scen.gains.includes("AS")){ const i=list.indexOf("E"); if(i>=0) list.splice(i,1); }
   stackArr=list;
