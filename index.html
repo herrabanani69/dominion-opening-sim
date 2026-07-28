@@ -143,7 +143,7 @@ input[type=range]{accent-color:var(--gold)}
       <label><input type="checkbox" id="gAppend"> Add to existing results</label>
       <button id="trashAll" class="ghost" title="Clear all results">&#128465; all</button>
       <button id="coggle" class="ghost" title="Settings">&#9881;</button>
-      <span class="progress" id="progress"></span>
+      <button class="ghost" id="cancelBtn" style="display:none" title="Stop the current run (finished rows stay)">Stop</button> <span class="progress" id="progress"></span>
     </div>
     <div class="grouprow">
       <span class="tag">Openings</span>
@@ -390,6 +390,14 @@ const CARDS = {
   SV:{name:"Salvager",      cost:4, coin:0, cls:"A", action:true, plusA:0},
   HI:{name:"Hideout",       cost:4, coin:0, cls:"A", action:true, plusA:2},
   VI:{name:"Village",       cost:3, coin:0, cls:"A", action:true, plusA:2},
+  RS:{name:"Research",      cost:4, coin:0, cls:"D", action:true, plusA:1, duration:true},
+  FA:{name:"Farmers' Market", cost:3, coin:0, cls:"A", action:true, plusA:0},
+  AB:{name:"Astrolabe",     cost:3, coin:0, cls:"H", treasure:true, duration:true},
+  SH:{name:"Shop",          cost:3, coin:0, cls:"A", action:true, plusA:0},
+  SC:{name:"Sacrifice",     cost:4, coin:0, cls:"A", action:true, plusA:0},
+  FL:{name:"Flagship",      cost:4, coin:0, cls:"D", action:true, plusA:0, duration:true},
+  SG:{name:"Sage",          cost:3, coin:0, cls:"A", action:true, plusA:1},
+  GT:{name:"Ghost Town",    cost:3, coin:0, cls:"D", night:true, duration:true},
   QU:{name:"Quarry",        cost:4, coin:1, cls:"H", treasure:true},
   SM:{name:"Spice Merchant",cost:4, coin:0, cls:"A", action:true, plusA:0},
   LK:{name:"Lackeys",       cost:2, coin:0, cls:"A", action:true, plusA:0},
@@ -407,7 +415,7 @@ const CARDS = {
   SN:{name:"Sinister Plot", cost:4, coin:0, cls:"PR", project:true},
 };
 const BAD_CARDS=["C","E","X"];
-const OPEN_CARDS = ["V","R","T","D","MO","SU","FI","FG","DU","CD","CE","BA","LK","H","L","W","G","K","Z","CH","SK","CM","CS","SR","GE","EX","WW","DG","AS","BF","TE","VI","PG","ST","B","M","P","A","I","Y","N","O","U","J","AD","HI","IM","MG","PT","BH","CR","GO","PC","AL","KS","EN","CO","SV","BL","XP","NJ","ME","QU","SM","FH","SL","SN","F","FM","WE"];
+const OPEN_CARDS = ["V","R","T","D","MO","SU","FI","FG","DU","CD","CE","BA","LK","H","L","W","G","K","Z","CH","SK","CM","CS","SR","GE","EX","WW","DG","AS","BF","TE","VI","FA","AB","SH","SG","GT","PG","ST","B","M","P","A","I","Y","N","O","U","J","AD","HI","IM","MG","PT","BH","CR","GO","PC","AL","KS","EN","CO","SV","BL","XP","NJ","ME","QU","SM","FH","RS","SC","FL","SL","SN","F","FM","WE"];
 const PICKABLE   = ["S"].concat(OPEN_CARDS);
 
 /* ================= engine =================
@@ -420,6 +428,7 @@ function newGame(){
           gearMode:"coins", cellarMode:"safe", wwMode:"copper", envoyMode:"treasure",
           cargoMode:"silver", blockadeMode:"silver", ducatTrash:true, allowEarly:false,
           baubleMode:"silver", salvagerMode:"off", baubleAvail:false, nextDungeon:0, stackT3:null, stackUsed:false,
+          fmPile:0, flagshipPend:0, phantoms:[], nextActs:0,
           nextCoins:0, nextDraws:0, nextDiscard:0, nextChurchTrash:0,
           havenMode:"coins", starMode:"best", advisorMode:"treasure", needPotion:false};
 }
@@ -522,6 +531,8 @@ function keepValues(g){
     if(k==="GO") return 1.9;
     if(k==="CR") return 1.4;
     if(k==="SU") return 1.0;
+    if(k==="AB") return 1.4;
+    if(k==="QU") return 1.2;
     if(k==="FG") return 1.7;
     if(k==="DU") return 1.1;
     if(k==="GD") return 3;
@@ -544,16 +555,46 @@ function discardWorstN(g,n,who,emit){
   }
 }
 
+const FLAGSHIP_OK=new Set(["EX","T","V","D","VI","SG","Z","HI","AD","IM","MG","PT","PC","FM","WW","CD","CE","BH","N","MO","LK","NJ","Y","EN","J","SR","FH","U","W","HO"]);
 function playActions(g, target, emit){
-  let actions=1;
+  let actions=1+(g.nextActs||0);
+  if(g.nextActs>0 && emit) emit("Ghost Town: +1 card, +1 action at start of turn");
+  g.nextActs=0;
   const lastTurn = g.turn>=4;
-  for(const k of ["W","U","HO","EX","DG","AL","T","V","D","VI","Z","HI","SM","AD","IM","MG","PT","PC","FM","WW","CD","CE","A","G","O","F","L","R","P","K","CH","H","BH","N","M","B","EN","Y","GE","SV","CO","J","MO","LK","NJ","FH","SR","CS","TE","ME","BL","FI","KS","CM"]){
+  for(const k of ["W","U","HO","EX","DG","AL","T","V","D","VI","SG","Z","HI","RS","SM","SH","AD","IM","MG","PT","PC","FM","WW","CD","CE","A","G","O","F","L","R","P","K","CH","H","BH","N","M","SC","B","EN","Y","GE","SV","CO","J","MO","LK","NJ","FH","FL","SR","CS","TE","FA","ME","BL","FI","KS","CM"]){
     while(g.hand.includes(k) || (CARDS[k].shadow && g.deck.includes(k))){
       const fromDeck = CARDS[k].shadow && !g.hand.includes(k);
       if(actions<=0){
         if(g.villagers>0){ g.villagers--; actions++; if(emit) emit("spend a Villager (+1 action, "+g.villagers+" left)"); }
         else { if(emit) emit("no actions left to play "+CARDS[k].name); break; }
       }
+      if(g.flagshipPend>0 && FLAGSHIP_OK.has(k) && g.hand.includes(k)){
+        g.flagshipPend--; actions++; g.hand.push(k); g.phantoms.push(k);
+        if(emit) emit("Flagship: "+CARDS[k].name+" will be played twice");
+      }
+      if(k==="SC"){ // Sacrifice (terminal): trash a card for its type bonus
+        const c0=turnCoins(g);
+        let mode=null;
+        if(c0<target && c0+1>=target && g.hand.includes("C")) mode="copper"; // -1 Copper +$2 secures the target
+        else if(c0<target && g.hand.some(x=>x!=="SC"&&CARDS[x].action&&!CARDS[x].shadow)) mode="action"; // gamble on +2 cards +2 actions
+        else if(spareEstate(g)) mode="estate";
+        else if(g.hand.includes("C") && c0-1+2>=target) mode="copper";
+        if(!mode){ if(emit) emit("Sacrifice stays in hand (nothing worth trashing)"); break; }
+        removeOne(g.hand,"SC"); g.inPlay.push("SC");
+        if(mode==="copper"){
+          removeOne(g.hand,"C"); g.trash.push("C"); g.bonus+=2;
+          if(emit) emit("play Sacrifice: trash a Copper (Treasure) -> +$2");
+        } else if(mode==="action"){
+          const t=g.hand.find(x=>x!=="SC"&&CARDS[x].action&&!CARDS[x].shadow);
+          removeOne(g.hand,t); g.trash.push(t); actions+=2;
+          if(emit) emit("play Sacrifice: trash "+CARDS[t].name+" (Action) -> +2 cards, +2 actions");
+          draw(g,2,emit);
+        } else {
+          removeOne(g.hand,"E"); g.trash.push("E");
+          if(emit) emit("play Sacrifice: trash an Estate (Victory) -> +2 VP (not scored here)");
+        }
+      }
+
       if(k==="B" && !g.hand.includes("E")){
         if(emit) emit("Baron stays in hand (no Estate; playing it would only gain a junk Estate)");
         break;
@@ -648,6 +689,47 @@ function playActions(g, target, emit){
         } else if(emit) emit("Border Guard: nothing to reveal");
       }
 
+      if(k==="SG"){ // Sage: +1 Action; reveal until a card costing $3+ appears -> hand
+        removeOne(g.hand,"SG"); g.inPlay.push("SG");
+        if(emit) emit("play Sage (+1 action, dig for a $3+ card)");
+        const looked=[];
+        let found=null;
+        while(true){
+          if(g.deck.length===0){
+            if(g.discard.length===0) break;
+            if(emit) emit("shuffle discard into deck (to reveal)"); shuffleInto(g, emit);
+          }
+          if(g.deck.length===0) break;
+          const top=g.deck.pop();
+          if(costNow(g,top)>=3){ found=top; break; }
+          looked.push(top);
+        }
+        if(emit && (found||looked.length)) emit("Sage reveals: "+looked.concat(found?[found]:[]).map(x=>CARDS[x].name).join(", "));
+        if(found){ g.hand.push(found); if(emit) emit("Sage: "+CARDS[found].name+" (costs $3+) goes to hand"); }
+        else if(emit) emit("Sage: nothing costing $3+ found");
+        g.discard.push(...looked);
+      }
+
+      if(k==="RS"){ // Research (Duration): +1 Action; trash an Estate -> set aside 2 deck cards for next turn
+        if(lastTurn || !spareEstate(g)){
+          if(emit) emit("Research stays in hand ("+(lastTurn?"last simulated turn":"no spare Estate to trash")+")");
+          break;
+        }
+        removeOne(g.hand,"RS"); g.duration.push("RS");
+        removeOne(g.hand,"E"); g.trash.push("E");
+        if(emit) emit("play Research (+1 action): trash an Estate ($2)");
+        let n=0;
+        for(let i=0;i<2;i++){
+          if(g.deck.length===0){
+            if(g.discard.length===0) break;
+            if(emit) emit("shuffle discard into deck (to set aside)"); shuffleInto(g, emit);
+          }
+          if(g.deck.length===0) break;
+          g.setAside.push(g.deck.pop()); n++;
+        }
+        if(emit) emit("Research: set aside "+n+" card"+(n!==1?"s":"")+" face down (they join the next hand)");
+      }
+
       if(k==="Z"){ // Lookout: +1 Action; look at 3: trash 1, discard 1, topdeck 1
         removeOne(g.hand,"Z"); g.inPlay.push("Z");
         if(emit) emit("play Lookout (+1 action, look at top 3)");
@@ -720,6 +802,17 @@ function playActions(g, target, emit){
           if(emit) emit("play Spice Merchant: trash a Copper -> +2 cards, +1 action");
           draw(g,2,emit);
           actions++;
+        }
+      }
+
+      if(k==="SH"){ // Shop: +1 Card, +$1; may play an action from hand with no copy in play
+        removeOne(g.hand,"SH"); g.inPlay.push("SH"); g.bonus+=1;
+        if(emit) emit("play Shop (+1 card, +$1)");
+        draw(g,1,emit);
+        const free=g.hand.find(x=>CARDS[x].action && !CARDS[x].shadow && !g.inPlay.includes(x) && !g.duration.includes(x));
+        if(free){
+          actions++;
+          if(emit) emit("Shop: may play "+CARDS[free].name+" (no copy in play) — +1 action granted");
         }
       }
 
@@ -1193,6 +1286,25 @@ function playActions(g, target, emit){
         draw(g,2,emit);
       }
 
+      if(k==="FL"){ // Flagship (Duration, terminal): +$2; the next action played is doubled
+        removeOne(g.hand,"FL"); g.duration.push("FL");
+        g.bonus+=2; g.flagshipPend++;
+        if(emit) emit("play Flagship (+$2; the next action card will be played twice)");
+      }
+
+      if(k==="FA"){ // Farmers' Market (terminal): +1 Buy; pile VP mechanic
+        removeOne(g.hand,"FA");
+        if(g.fmPile>=4){
+          g.trash.push("FA");
+          if(emit) emit("play Farmers' Market: the pile has "+g.fmPile+" VP — take them and trash it");
+          g.fmPile=0;
+        } else {
+          g.inPlay.push("FA");
+          g.fmPile++; g.bonus+=g.fmPile;
+          if(emit) emit("play Farmers' Market (+1 buy): add 1 VP to the pile ("+g.fmPile+") -> +$"+g.fmPile);
+        }
+      }
+
       if(k==="SR"){ // Storeroom (terminal): +1 Buy; sift junk, then cash junk for +$1 each
         removeOne(g.hand,"SR"); g.inPlay.push("SR");
         if(emit) emit("play Storeroom (+1 buy)");
@@ -1296,6 +1408,14 @@ function playActions(g, target, emit){
       }
 
       if(k==="FI"){ // Fishmonger (Shadow, terminal): +1 Buy, +$1
+        if(!lastTurn){
+          const nQU=countOf(g.hand,"QU");
+          const effT=((g.targetTypeRef||"action")==="action" && nQU>0)? Math.max(0,target-2*nQU) : target;
+          if(turnCoins(g)>=effT){
+            if(emit) emit("Fishmonger stays in the deck (this turn already reaches the target; it remains available next turn)");
+            break;
+          }
+        }
         if(!removeOne(g.hand,"FI")) removeOne(g.deck,"FI");
         g.inPlay.push("FI"); g.bonus+=1;
         if(emit) emit("play Fishmonger (+1 buy, +$1)"+(fromDeck?" — played from the deck (Shadow)":""));
@@ -1333,6 +1453,8 @@ function tiaraBuy(g, emit){
 }
 
 function cleanup(g, emit){
+  for(const p of g.phantoms||[]) removeOne(g.inPlay,p); // a Flagship replay is one card played twice, not two cards
+  g.phantoms=[];
   while(g.tentMode!=="discard" && g.inPlay.includes("TE")){
     removeOne(g.inPlay,"TE"); g.deck.push("TE");
     if(emit) emit("Tent: put it onto the deck instead of discarding (drawn next turn)");
@@ -1384,7 +1506,8 @@ function planBuys(m1, m2, gains, flags, startCoffers){
       const pgAct1 = pgT1, pgAct2 = pgT1||pgT2;
       const pag = (pgAct1 && (m1-spent1)>=1 ? 1:0) + (pgAct2 && (m2-spent2)>=1 ? 1:0);
       const gotPotion=(a.pick&&a.pick.card==="PO")||(b.pick&&b.pick.card==="PO");
-      const score=n*10000+(flags.targetPotion&&gotPotion?5000:0)+cost*100+pag*50-spend*10+cashPref;
+      const gtT2 = (b.pick&&b.pick.card==="GT") ? 1 : 0; // Ghost Town wants the turn-2 slot (its night play lands on turn 3)
+      const score=n*10000+(flags.targetPotion&&gotPotion?5000:0)+cost*100+pag*50+gtT2*40-spend*10+cashPref;
       if(!best||score>best.score) best={score,picks:[a,b]};
     }
   }
@@ -1431,13 +1554,20 @@ function execBuy(g, entry, hadGains, emit, tfair){
     }
     return spentMoney;
   }
+  if(pick.card==="GT"){
+    if(entry.spend>0){} // coffers already deducted above
+    spentMoney=CARDS[pick.card].cost-entry.spend;
+    g.duration.push("GT"); g.nextDraws++; g.nextActs++;
+    if(emit) emit("buy Ghost Town ($3): gained to hand and played in the night phase — +1 card, +1 action at the start of next turn");
+    return spentMoney;
+  }
   if(CARDS[pick.card].project){
     g.projects.push(pick.card);
     spentMoney=CARDS[pick.card].cost-entry.spend;
     if(emit) emit("buy project "+CARDS[pick.card].name+" ($"+CARDS[pick.card].cost+") — active for the rest of the game (not a card)");
   } else {
     const baseSpend = pick.how==="cash" ? CARDS[pick.card].cost-entry.spend : (pick.how==="amass"?2:0);
-    const useTF = tfair && (handCoins(g)-baseSpend)>=2;
+    const useTF = tfair && pick.card!=="GT" && (handCoins(g)-baseSpend)>=2;
     if(useTF){
       g.deck.push(pick.card);
       spentMoney=baseSpend+2;
@@ -1534,6 +1664,12 @@ function playTreasurePhase(g, target, scen, lastTurn, emit){
     g.deck.push("HO");
     if(emit) emit("play Supplies (+$1): gain a Horse onto the deck (drawn next turn)");
   }
+  // Astrolabe: +$1 and +1 buy now and at the start of next turn
+  while(g.hand.includes("AB")){
+    removeOne(g.hand,"AB"); g.duration.push("AB");
+    g.bonus+=1; g.nextCoins+=1;
+    if(emit) emit("play Astrolabe (+$1, +1 buy; the same again next turn)");
+  }
   // Bauble: choose +$1 and the topdeck option
   for(let i=countOf(g.hand,"BA"); i>0; i--){
     g.bonus+=1; g.baubleAvail=true;
@@ -1617,6 +1753,7 @@ function playGame(scen, target, rec){
   g.tentMode = scen.tentMode==="discard" ? "discard" : "top";
   g.hideoutMode = scen.hideoutMode==="copper" ? "copper" : "estate";
   g.saveMode = scen.saveMode==="best" ? "best" : "treasure";
+  g.targetTypeRef = scen.targetType||"action";
   g.messengerFlush = scen.messengerFlush==="flush" ? "flush" : "keep";
   {
     const mg=scen.messengerGain;
@@ -1668,7 +1805,7 @@ function playGame(scen, target, rec){
       }
       g.nextDungeon=0;
     }
-    g.nextDraws=0; g.nextCoins=0; g.nextDiscard=0; g.baubleAvail=false;
+    g.nextDraws=0; g.nextCoins=0; g.nextDiscard=0; g.baubleAvail=false; g.phantoms=[];
     g.inPlay.push(...g.duration); g.duration=[];
     if(g.projects.includes("SN") && turn>=2){
       if(turn>=4 && g.plotTokens>0){
@@ -2215,6 +2352,13 @@ function updateRulesNote(t){
     "Quarry: +$1 and, when the target is an Action, reduces its cost by $2 per Quarry played that turn. "+
     "Spice Merchant: trashes a Copper to draw 2 (+1 action), or takes +$2 instead when that secures the target; never plays without a Copper. "+
     "Fortune Hunter: +$2, looks at 3, plays the best plain treasure (a needed Potion first), puts the rest back best-on-top. "+
+    "Fishmonger now stays in the deck when the turn already reaches the (Quarry-adjusted) target, keeping its guaranteed +$1 for the next turn. "+
+    "Research: trashes a spare Estate to set aside 2 unseen deck cards for the next hand; skipped without an Estate or on the last turn. "+
+    "Farmers' Market: adds a VP and pays +$1 per pile VP (the pile persists between turns; at 4+ it takes the VP and trashes itself). "+
+    "Astrolabe: +$1 and +1 buy on both turns. Shop: peddler that grants an action when a distinct unplayed action is in hand (approximation of its free play). "+
+    "Sacrifice: trashes a Copper for +$2 when that secures the target, else a spare action for +2 cards +2 actions on a missing turn, else an Estate. "+
+    "Flagship: +$2 and doubles the next non-duration action played (works across turns; the doubled card counts as one card played twice). "+
+    "Sage: digs to the first $3+ card, discarding the cheap reveals. Ghost Town: gained to hand and night-played immediately — +1 card +1 action next turn; the planner prefers buying it on turn 2. "+
     "An Estate that a Baron in hand needs is never trashed, buried, set aside, or discarded.";
 }
 updateRulesNote(5);
@@ -2275,6 +2419,7 @@ function runScenarios(scens, forceAppend){
         "Target "+ct.label+" \u00b7 "+n.toLocaleString()+" games per opening \u00b7 95% margin of error at worst \u00b1"+moe+
         " percentage points per row \u00b7 click a column header to sort (third click restores default) \u00b7 \u25b6 watches a row, \ud83d\uddd1 removes it.";
       progress.textContent="done";
+      document.getElementById("cancelBtn").style.display="none";
       runbtn.disabled=false; document.getElementById("runAllPairs").disabled=false;
     }
   };
@@ -2334,19 +2479,40 @@ function runScenarios(scens, forceAppend){
   if(pending.length===0){ progress.textContent="done — all "+scens.length+" from cache"; return; }
   const runSyncRemaining=async ()=>{
     for(const i of pending){
+      if(cancelled) return;
       if(finished.has(i)) continue;
       progress.textContent="running: "+scens[i].label+" \u2026";
       await new Promise(r=>setTimeout(r,15));
       finishIdx(i, runScenario(plans[i].runScen||scens[i],t,plans[i].runN));
     }
   };
+  // confirmation for huge runs, cancel support
+  const totalGames=plans.reduce((a,pl)=>a+(pl.runN||0),0);
+  if(totalGames>50000000 && !window.confirm("This run needs "+Math.round(totalGames/1e6)+" million simulated games. Continue?")){
+    progress.textContent="cancelled";
+    document.getElementById("runbtn").disabled=false; document.getElementById("runAllPairs").disabled=false;
+    return;
+  }
+  let cancelled=false;
+  const cb=document.getElementById("cancelBtn");
+  cb.style.display="";
+  const endRun=(msg)=>{
+    cb.style.display="none"; cb.onclick=null;
+    document.getElementById("runbtn").disabled=false; document.getElementById("runAllPairs").disabled=false;
+    if(msg) progress.textContent=msg;
+  };
+  cb.onclick=()=>{
+    cancelled=true;
+    if(pool){ try{for(const w of pool)w.terminate();}catch(e){} pool=null; }
+    endRun("stopped — "+finished.size+"/"+scens.length+" openings finished");
+  };
   const p=getPool();
   if(p){
     progress.textContent="running on "+p.length+" threads\u2026";
     let next=0, failed=false;
-    const fail=()=>{ if(failed)return; failed=true; try{for(const w of p)w.terminate();}catch(e){} pool=null; runSyncRemaining(); };
+    const fail=()=>{ if(failed||cancelled)return; failed=true; try{for(const w of p)w.terminate();}catch(e){} pool=null; runSyncRemaining(); };
     const feed=(w)=>{
-      if(failed || next>=pending.length) return;
+      if(failed || cancelled || next>=pending.length) return;
       const idx=pending[next++];
       w.onmessage=(e)=>{ finishIdx(e.data.idx, e.data.stats); feed(w); };
       w.onerror=fail;
@@ -2499,6 +2665,10 @@ document.getElementById("gPair").addEventListener("change",e=>{
     const c1=document.getElementById("cust1").value;
     const sel=document.getElementById("pairCard");
     if(c1!=="-" && [...sel.options].some(o=>o.value===c1)) sel.value=c1;
+  } else {
+    const p=document.getElementById("pairCard").value;
+    const c1=document.getElementById("cust1");
+    if([...c1.options].some(o=>o.value===p)) c1.value=p; // carry the changed card back to the custom picker
   }
   updateHavenVis();
   refreshWatchScenarios();
