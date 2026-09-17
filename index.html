@@ -391,6 +391,7 @@ const CARDS = {
   HI:{name:"Hideout",       cost:4, coin:0, cls:"A", action:true, plusA:2},
   VI:{name:"Village",       cost:3, coin:0, cls:"A", action:true, plusA:2},
   RC:{name:"Root Cellar",   cost:3, coin:0, cls:"A", action:true, plusA:1},
+  CX:{name:"Crossroads",    cost:2, coin:0, cls:"A", action:true, plusA:0},
   RS:{name:"Research",      cost:4, coin:0, cls:"D", action:true, plusA:1, duration:true},
   FA:{name:"Farmers' Market", cost:3, coin:0, cls:"A", action:true, plusA:0},
   AB:{name:"Astrolabe",     cost:3, coin:0, cls:"H", treasure:true, duration:true},
@@ -416,7 +417,7 @@ const CARDS = {
   SN:{name:"Sinister Plot", cost:4, coin:0, cls:"PR", project:true},
 };
 const BAD_CARDS=["C","E","X"];
-const OPEN_CARDS = ["V","R","T","D","MO","SU","FI","FG","DU","CD","CE","BA","LK","H","L","W","G","K","Z","CH","SK","CM","CS","SR","GE","EX","WW","DG","AS","BF","TE","VI","FA","AB","SH","SG","GT","RC","PG","ST","B","M","P","A","I","Y","N","O","U","J","AD","HI","IM","MG","PT","BH","CR","GO","PC","AL","KS","EN","CO","SV","BL","XP","NJ","ME","QU","SM","FH","RS","SC","FL","SL","SN","F","FM","WE"];
+const OPEN_CARDS = ["V","R","T","D","MO","SU","FI","FG","DU","CD","CE","BA","LK","CX","H","L","W","G","K","Z","CH","SK","CM","CS","SR","GE","EX","WW","DG","AS","BF","TE","VI","FA","AB","SH","SG","GT","RC","PG","ST","B","M","P","A","I","Y","N","O","U","J","AD","HI","IM","MG","PT","BH","CR","GO","PC","AL","KS","EN","CO","SV","BL","XP","NJ","ME","QU","SM","FH","RS","SC","FL","SL","SN","F","FM","WE"];
 const PICKABLE   = ["S"].concat(OPEN_CARDS);
 
 /* ================= engine =================
@@ -556,13 +557,13 @@ function discardWorstN(g,n,who,emit){
   }
 }
 
-const FLAGSHIP_OK=new Set(["EX","T","V","D","VI","SG","Z","HI","AD","IM","MG","PT","PC","FM","WW","CD","CE","BH","N","MO","LK","NJ","Y","EN","J","SR","FH","U","W","HO"]);
+const FLAGSHIP_OK=new Set(["EX","T","V","D","VI","CX","SG","Z","HI","AD","IM","MG","PT","PC","FM","WW","CD","CE","BH","N","MO","CX","LK","NJ","Y","EN","J","SR","FH","U","W","HO"]);
 function playActions(g, target, emit){
   let actions=1+(g.nextActs||0);
   if(g.nextActs>0 && emit) emit("Ghost Town: +1 card, +1 action at start of turn");
   g.nextActs=0;
   const lastTurn = g.turn>=4;
-  for(const k of ["W","U","HO","EX","RC","DG","AL","T","V","D","VI","SG","Z","HI","RS","SM","SH","AD","IM","MG","PT","PC","FM","WW","CD","CE","A","G","O","F","L","R","P","K","CH","H","BH","N","M","SC","B","EN","Y","GE","SV","CO","J","MO","LK","NJ","FH","FL","SR","CS","TE","FA","ME","BL","FI","KS","CM"]){
+  for(const k of ["W","U","HO","EX","RC","DG","AL","T","V","D","VI","CX","SG","Z","HI","RS","SM","SH","AD","IM","MG","PT","PC","FM","WW","CD","CE","A","G","O","F","L","R","P","K","CH","H","BH","N","M","SC","B","EN","Y","GE","SV","CO","J","MO","LK","NJ","FH","FL","SR","CS","TE","FA","ME","BL","FI","KS","CM"]){
     while(g.hand.includes(k) || (CARDS[k].shadow && g.deck.includes(k))){
       const fromDeck = CARDS[k].shadow && !g.hand.includes(k);
       if(actions<=0){
@@ -701,6 +702,15 @@ function playActions(g, target, emit){
           removeOne(looked,keep); g.hand.push(keep); g.discard.push(...looked);
           if(emit){ g.revealed.length=0; emit("take "+CARDS[keep].name+" into hand, discard the rest (Lantern/Horn ignored)"); }
         } else if(emit) emit("Border Guard: nothing to reveal");
+      }
+
+      if(k==="CX"){ // Crossroads: reveal hand, +1 Card per Victory card; first play this turn +3 Actions
+        removeOne(g.hand,"CX"); g.inPlay.push("CX");
+        const nV=g.hand.filter(x=>x==="E"||CARDS[x].victory).length;
+        const first=!g.cxPlayed; g.cxPlayed=true;
+        if(first) actions+=3;
+        if(emit) emit("play Crossroads: reveal hand, "+nV+" Victory card"+(nV!==1?"s":"")+" -> +"+nV+" card"+(nV!==1?"s":"")+(first?", +3 actions (first this turn)":" (no actions: not the first this turn)"));
+        if(nV>0) draw(g,nV,emit);
       }
 
       if(k==="SG"){ // Sage: +1 Action; reveal until a card costing $3+ appears -> hand
@@ -1819,7 +1829,7 @@ function playGame(scen, target, rec){
       }
       g.nextDungeon=0;
     }
-    g.nextDraws=0; g.nextCoins=0; g.nextDiscard=0; g.baubleAvail=false; g.phantoms=[];
+    g.nextDraws=0; g.nextCoins=0; g.nextDiscard=0; g.baubleAvail=false; g.phantoms=[]; g.cxPlayed=false;
     g.inPlay.push(...g.duration); g.duration=[];
     if(g.projects.includes("SN") && turn>=2){
       if(turn>=4 && g.plotTokens>0){
@@ -2374,6 +2384,7 @@ function updateRulesNote(t){
     "Flagship: +$2 and doubles the next non-duration action played (works across turns; the doubled card counts as one card played twice). "+
     "Sage: digs to the first $3+ card, discarding the cheap reveals. Ghost Town: gained to hand and night-played immediately — +1 card +1 action next turn; the planner prefers buying it on turn 2. "+
     "Root Cellar: +3 cards, +1 action, +3 Debt on play — only played on a turn that would otherwise miss, since the Debt is paid from this turn's coins before buying (leftovers carry over). "+
+    "Crossroads: draws one card per Victory card in hand (Mill counts) and gives +3 actions the first time it is played each turn; played early so Estates are still in hand to count. "+
     "An Estate that a Baron in hand needs is never trashed, buried, set aside, or discarded.";
 }
 updateRulesNote(5);
