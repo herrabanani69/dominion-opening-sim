@@ -410,6 +410,7 @@ const CARDS = {
   XP:{name:"Exploration",   cost:4, coin:0, cls:"PR", project:true},
   BF:{name:"Bonfire",       cost:3, coin:0, cls:"PR", event:true},
   WE:{name:"Wedding",       cost:4, coin:0, cls:"PR", event:true},
+  JO:{name:"Journey",       cost:4, coin:0, cls:"PR", event:true}, // extra turn after this one; 3/4 openings only
   AS:{name:"Asceticism",    cost:3, coin:0, cls:"PR", event:true},
   PG:{name:"Pageant",       cost:3, coin:0, cls:"PR", project:true},
   ST:{name:"Star Chart",    cost:3, coin:0, cls:"PR", project:true},
@@ -417,7 +418,7 @@ const CARDS = {
   SN:{name:"Sinister Plot", cost:4, coin:0, cls:"PR", project:true},
 };
 const BAD_CARDS=["C","E","X"];
-const OPEN_CARDS = ["V","R","T","D","MO","SU","FI","FG","DU","CD","CE","BA","LK","CX","H","L","W","G","K","Z","CH","SK","CM","CS","SR","GE","EX","WW","DG","AS","BF","TE","VI","FA","AB","SH","SG","GT","RC","PG","ST","B","M","P","A","I","Y","N","O","U","J","AD","HI","IM","MG","PT","BH","CR","GO","PC","AL","KS","EN","CO","SV","BL","XP","NJ","ME","QU","SM","FH","RS","SC","FL","SL","SN","F","FM","WE"];
+const OPEN_CARDS = ["V","R","T","D","MO","SU","FI","FG","DU","CD","CE","BA","LK","CX","H","L","W","G","K","Z","CH","SK","CM","CS","SR","GE","EX","WW","DG","AS","BF","TE","VI","FA","AB","SH","SG","GT","RC","PG","ST","B","M","P","A","I","Y","N","O","U","J","AD","HI","IM","MG","PT","BH","CR","GO","PC","AL","KS","EN","CO","SV","BL","XP","NJ","ME","QU","SM","FH","RS","SC","FL","SL","SN","F","FM","WE","JO"];
 const PICKABLE   = ["S"].concat(OPEN_CARDS);
 
 /* ================= engine =================
@@ -430,7 +431,7 @@ function newGame(){
           gearMode:"coins", cellarMode:"safe", wwMode:"copper", envoyMode:"treasure",
           cargoMode:"silver", blockadeMode:"silver", ducatTrash:true, allowEarly:false,
           baubleMode:"silver", salvagerMode:"off", baubleAvail:false, nextDungeon:0, stackT3:null, stackUsed:false,
-          fmPile:0, flagshipPend:0, phantoms:[], nextActs:0,
+          fmPile:0, flagshipPend:0, phantoms:[], nextActs:0, journeyPending:false, t25:0, hit25:false,
           nextCoins:0, nextDraws:0, nextDiscard:0, nextChurchTrash:0,
           havenMode:"coins", starMode:"best", advisorMode:"treasure", needPotion:false};
 }
@@ -1476,9 +1477,10 @@ function tiaraBuy(g, emit){
   if(emit) emit("Tiara: put the gained "+CARDS[gain].name+" on top of the deck");
 }
 
-function cleanup(g, emit){
+function cleanup(g, emit, keepPlay){
   for(const p of g.phantoms||[]) removeOne(g.inPlay,p); // a Flagship replay is one card played twice, not two cards
   g.phantoms=[];
+  if(keepPlay){ g.discard.push(...g.hand); g.hand=[]; return; } // Journey: cards in play are not discarded
   while(g.tentMode!=="discard" && g.inPlay.includes("TE")){
     removeOne(g.inPlay,"TE"); g.deck.push("TE");
     if(emit) emit("Tent: put it onto the deck instead of discarding (drawn next turn)");
@@ -1565,6 +1567,10 @@ function execBuy(g, entry, hadGains, emit, tfair){
       if(emit) emit("buy Wedding ($4 + 3 Debt, +1 VP): gain a Gold");
       if(tfair && (handCoins(g)-spentMoney)>=2){ g.deck.push("GD"); spentMoney+=2; if(emit) emit("Travelling Fair: the Gold goes onto the deck"); }
       else g.discard.push("GD");
+    }
+    if(pick.card==="JO"){
+      g.journeyPending=true;
+      if(emit) emit("buy Journey ($4): cards in play stay out this clean-up, and an extra turn follows");
     }
     if(pick.card==="BF"){
       const n = g.bonfireN===1 ? 1 : 2;
@@ -1799,7 +1805,8 @@ function playGame(scen, target, rec){
   if(emit) emit("starting deck shuffled (5/2 splits rerolled"+(scen.gains.includes("K")?"; Magic Lamp replaces a Copper":"")+(g.coffers?"; start with 1 Coffers":"")+") — target $"+target+(scen.split==="34"?" — 3/4 split only":scen.split==="43"?" — 4/3 split only":""));
 
   let plan=null;
-  for(let turn=1; turn<=4; turn++){
+  for(const turn of [1,2,2.5,3,4]){
+    if(turn===2.5){ if(!g.journeyPending) continue; g.journeyPending=false; }
     g.turn=turn; g.bonus=0;
     const drawEmit = emit ? (m)=>{ if(m.startsWith("shuffle")||m.startsWith("Star Chart")) emit(m); } : null;
     draw(g,5,drawEmit);
@@ -1849,7 +1856,7 @@ function playGame(scen, target, rec){
         draw(g,k,emit);
       } else if(countOf(g.hand,"C")>0 && emit) emit("Silos: keeping all Coppers (no discard improves the odds)");
     }
-    if(emit) emit("— Turn "+turn+": hand "+g.hand.map(x=>CARDS[x].name).join(", ")+" ($"+turnCoins(g)+(g.coffers?", "+g.coffers+" Coffers":"")+(g.villagers?", "+g.villagers+" Villagers":"")+") —");
+    if(emit) emit("— Turn "+(turn===2.5?"2½ (Journey)":turn)+": hand "+g.hand.map(x=>CARDS[x].name).join(", ")+" ($"+turnCoins(g)+(g.coffers?", "+g.coffers+" Coffers":"")+(g.villagers?", "+g.villagers+" Villagers":"")+") —");
 
     if(turn<=2){
       if(g.debt>0){
@@ -1871,7 +1878,11 @@ function playGame(scen, target, rec){
           if(emit) emit("Exploration: no card gained this buy phase -> +1 Coffers, +1 Villager (now "+g.coffers+" / "+g.villagers+")");
         }
       }
-      cleanup(g, emit);
+      if(g.journeyPending){
+        for(const k of g.hand.slice()) if(CARDS[k].treasure){ removeOne(g.hand,k); g.inPlay.push(k); }
+        if(emit) emit("Journey: the played treasures stay in play through clean-up (they miss the coming shuffle)");
+        cleanup(g, emit, true);
+      } else cleanup(g, emit);
       if(emit) emit("clean-up");
     } else {
       // Amass line: with an Action-type target costing <=$5, a turn with no action
@@ -1959,20 +1970,21 @@ function playGame(scen, target, rec){
         g.coffers++; g.villagers++;
         if(emit) emit("Exploration: no card gained this buy phase -> +1 Coffers, +1 Villager (now "+g.coffers+" / "+g.villagers+")");
       }
-      if(turn===3){ g.t3=c; g.hit3=hit; } else { g.t4=c; g.hit4=hit; }
+      if(turn===2.5){ g.t25=c; g.hit25=hit; } else if(turn===3){ g.t3=c; g.hit3=hit; } else { g.t4=c; g.hit4=hit; }
       cleanup(g, emit);
       if(emit) emit("clean-up");
     }
   }
-  return {t3:g.t3, t4:g.t4, hit3:g.hit3, hit4:g.hit4};
+  return {t3:g.t3, t4:g.t4, hit3:g.hit3, hit4:g.hit4, hit25:g.hit25};
 }
 
 function runStats(scen, target, n){
   let h3=0,h4=0,either=0,both=0,sum3=0,sum4=0,hits=0;
   for(let i=0;i<n;i++){
     const r=playGame(scen,target,null);
-    const a=r.hit3, b=r.hit4;
-    if(a)h3++; if(b)h4++; if(a||b)either++; if(a&&b)both++; hits+=(a?1:0)+(b?1:0);
+    const a=r.hit3, b=r.hit4, j=!!r.hit25;
+    const nh=(a?1:0)+(b?1:0)+(j?1:0);
+    if(a)h3++; if(b)h4++; if(nh>0)either++; if(nh>=2)both++; hits+=nh;
     sum3+=r.t3; sum4+=r.t4;
   }
   return {h3:h3/n,h4:h4/n,either:either/n,both:both/n,hits:hits/n,avg3:sum3/n,avg4:sum4/n};
@@ -2189,6 +2201,7 @@ function openCardsNow(){
     if(!document.getElementById("gFishAlways").checked) list=list.filter(k=>k!=="FM");
     list=list.filter(k=>k!=="WE"); // Wedding: single-split only, no override
   }
+  if(split!=="34") list=list.filter(k=>k!=="JO"); // Journey: only sensible as the $4 buy of a 3/4 opening
   return document.getElementById("gBad").checked ? list.concat(BAD_CARDS) : list;
 }
 function pickableNow(){
@@ -2385,6 +2398,7 @@ function updateRulesNote(t){
     "Sage: digs to the first $3+ card, discarding the cheap reveals. Ghost Town: gained to hand and night-played immediately — +1 card +1 action next turn; the planner prefers buying it on turn 2. "+
     "Root Cellar: +3 cards, +1 action, +3 Debt on play — only played on a turn that would otherwise miss, since the Debt is paid from this turn's coins before buying (leftovers carry over). "+
     "Crossroads: draws one card per Victory card in hand (Mill counts) and gives +3 actions the first time it is played each turn; played early so Estates are still in hand to count. "+
+    "Journey ($4 event, 3/4 openings only, bought on turn 2): the treasures played for it stay in play through clean-up (so they miss the shuffle), then an extra turn 2½ is played in full — its target gains count toward # hits, hit-either and hit-both (both = two or more hits across 2½, 3 and 4). "+
     "An Estate that a Baron in hand needs is never trashed, buried, set aside, or discarded.";
 }
 updateRulesNote(5);
